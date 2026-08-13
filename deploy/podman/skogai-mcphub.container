@@ -11,6 +11,7 @@ Volume=%h/skogai/config/mcp_settings.json:/app/mcp_settings.json
 EnvironmentFile=%h/.config/containers/systemd/skogai-mcphub.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
+Environment=TRUST_PROXY=1
 Environment=MCPHUB_SETTING_PATH=/app/mcp_settings.json
 
 [Service]
