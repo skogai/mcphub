@@ -1,0 +1,21 @@
+[Unit]
+Description=SkogAI MCPHub Service
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/mcphub:local
+ContainerName=skogai-mcphub
+PublishPort=3000:3000
+Volume=%h/skogai/config/mcp_settings.json:/app/mcp_settings.json
+EnvironmentFile=%h/.config/containers/systemd/skogai-mcphub.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=MCPHUB_SETTING_PATH=/app/mcp_settings.json
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

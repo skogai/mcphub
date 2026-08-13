@@ -3,3 +3,45 @@ node = "20"
 pnpm = "10.12.4"
 python = "3.13"
 uv = "latest"
+
+[tasks."container:build"]
+description = "Build the mcphub podman image"
+run = "podman build -t localhost/mcphub:local ."
+
+[tasks."container:install"]
+description = "Install/refresh the Quadlet unit and generate a JWT secret on first run"
+run = """
+set -eu
+mkdir -p ~/.config/containers/systemd
+cp deploy/podman/skogai-mcphub.container ~/.config/containers/systemd/skogai-mcphub.container
+if [ ! -f ~/.config/containers/systemd/skogai-mcphub.env ]; then
+  umask 077
+  printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > ~/.config/containers/systemd/skogai-mcphub.env
+fi
+systemctl --user daemon-reload
+"""
+
+[tasks."container:deploy"]
+description = "Build the image, install the unit, and restart the service"
+depends = ["container:build", "container:install"]
+run = "systemctl --user restart skogai-mcphub.service"
+
+[tasks."container:start"]
+description = "Start the mcphub service"
+run = "systemctl --user start skogai-mcphub.service"
+
+[tasks."container:stop"]
+description = "Stop the mcphub service"
+run = "systemctl --user stop skogai-mcphub.service"
+
+[tasks."container:restart"]
+description = "Restart the mcphub service"
+run = "systemctl --user restart skogai-mcphub.service"
+
+[tasks."container:status"]
+description = "Show mcphub service status"
+run = "systemctl --user status skogai-mcphub.service"
+
+[tasks."container:logs"]
+description = "Follow mcphub service logs"
+run = "journalctl --user -u skogai-mcphub.service -f"
