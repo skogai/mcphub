@@ -32,3 +32,4 @@ temp-test-config/
 # GitGuardian cache
 .cache_ggshield
 /.claude/worktrees
+/.skogai/config/script_metadata.json
