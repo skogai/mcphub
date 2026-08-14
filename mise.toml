@@ -14,10 +14,11 @@ run = """
 set -eu
 mkdir -p ~/.config/containers/systemd
 cp deploy/podman/skogai-mcphub.container ~/.config/containers/systemd/skogai-mcphub.container
-if [ ! -f ~/.config/containers/systemd/skogai-mcphub.env ]; then
-  umask 077
-  printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > ~/.config/containers/systemd/skogai-mcphub.env
-fi
+umask 077
+ENV_FILE=~/.config/containers/systemd/skogai-mcphub.env
+touch "$ENV_FILE"
+grep -q '^JWT_SECRET=' "$ENV_FILE" || printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" >> "$ENV_FILE"
+grep -q '^DB_URL=' "$ENV_FILE" || printf 'DB_URL=postgresql://mcphub:mcphub_password@postgres:5432/mcphub\n' >> "$ENV_FILE"
 systemctl --user daemon-reload
 """
 

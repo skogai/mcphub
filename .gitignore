@@ -29,6 +29,9 @@ coverage/
 data/
 temp-test-config/
 
+# runtime config (file-mode fallback / migration source; DB is authoritative when USE_DB/DB_URL is set)
+/mcp_settings.json
+
 # GitGuardian cache
 .cache_ggshield
 /.claude/worktrees

@@ -7,12 +7,11 @@ Wants=network-online.target
 Image=localhost/mcphub:local
 ContainerName=skogai-mcphub
 PublishPort=3000:3000
-Volume=%h/skogai/config/mcp_settings.json:/app/mcp_settings.json
+Network=mcphub_mcphub-network
 EnvironmentFile=%h/.config/containers/systemd/skogai-mcphub.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=TRUST_PROXY=1
-Environment=MCPHUB_SETTING_PATH=/app/mcp_settings.json
 
 [Service]
 Restart=always

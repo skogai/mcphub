@@ -14,7 +14,7 @@ This guide is intentionally short. It points to where the details live rather th
 | -------- | --------------------------------------- | -------------------------------------------- |
 | Backend  | [src/index.ts](src/index.ts) → [src/server.ts](src/server.ts) | Express + TypeORM (optional) + MCP SDK       |
 | Frontend | [frontend/src/](frontend/src/)          | Vite + React + Tailwind, i18n via react-i18next |
-| Config   | [mcp_settings.json](mcp_settings.json)  | MCP server defs, users, groups, OAuth state  |
+| Config   | `mcp_settings.json` (git-ignored, local)  | MCP server defs, users, groups, OAuth state — file-mode default; ignored once `DB_URL`/`USE_DB` is set. See [deploy/podman/README.md](deploy/podman/README.md) for this fork's DB-backed deployment |
 | Docs     | [docs/](docs/)                          | Public docs (Mintlify). See [docs/development/](docs/development/) for architecture |
 
 Layout map (read the directory when you need specifics, don't expand it here):
@@ -84,7 +84,9 @@ The runtime requirement is `^18.0.0 || >=20.0.0` (see `package.json`); CI runs o
 
 ### Dual datasource (JSON ⇄ PostgreSQL)
 
-`USE_DB=true` + `DB_URL` switches storage from `mcp_settings.json` to Postgres via TypeORM.
+`USE_DB=true` + `DB_URL` switches storage from `mcp_settings.json` to Postgres via TypeORM. Migration from file → DB (`src/utils/migration.ts`) runs automatically on boot, but only when the `users` table is empty — if it already has rows, boot skips migration and uses whatever is already in the DB, silently, even if `mcp_settings.json` has since changed. There is no reverse sync: once in DB mode, the file is never read again except as that one-time migration source.
+
+This fork's local deployment (`deploy/podman/`) runs in DB mode against a shared Postgres container — see [deploy/podman/README.md](deploy/podman/README.md).
 
 **When adding/changing a persisted field, update every layer or migrations will silently drop it:**
 
