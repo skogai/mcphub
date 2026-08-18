@@ -1,33 +1,104 @@
-version: "3.8"
+version: '3.8'
 
 services:
   # PostgreSQL database for MCPHub configuration
   postgres:
     image: pgvector/pgvector:pg17
-    container_name: mcphub-postgres
+    container_name: skogai-postgres
     environment:
-      POSTGRES_DB: mcphub
-      POSTGRES_USER: mcphub
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-mcphub_password}
+      POSTGRES_DB: ${POSTGRES_MCPHUB_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mcphub:/var/lib/postgresql/data
+      - skogai-memory:/var/lib/postgresql/data
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - '${DB_PORT:-5432}:5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcphub"]
+      test: ['CMD-SHELL', 'pg_isready -U POSTGRES_USER -d POSTGRES_MCPHUB_DB']
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - mcphub-network
+      - skogai-internal-network
+  skogai-memory:
+    # image: ghcr.io/basicmachines-co/basic-memory:latest
+    # Uncomment to build locally instead:
+    build: .
+
+    container_name: skogai-memory-server
+
+    # Volume mounts for knowledge directories and persistent data
+    volumes:
+      # Persistent storage for configuration and database
+      # Container runs as `appuser` (Dockerfile USER directive), so the CLI
+      # config dir lives under /home/appuser, not /root.
+      - skogai-memory-config:/home/appuser/.basic-memory:rw
+
+      # Mount your knowledge directory (required)
+      # Change './knowledge' to your actual Obsidian vault or knowledge directory
+      - ./docs:/app/data:rw
+
+      # OPTIONAL: Mount additional knowledge directories for multiple projects
+      - ./dot-skogai:/app/dot-skogai:rw
+      - ./dash-skogai:/app/dash-skogai:rw
+
+      # You can edit the project config manually in the mounted config volume
+      # The default project will be configured to use /app/data
+    environment:
+      # Project configuration
+      - BASIC_MEMORY_DEFAULT_PROJECT=docs
+
+      # Enable real-time file synchronization (recommended for Docker)
+      - BASIC_MEMORY_SYNC_CHANGES=true
+
+      # Logging configuration
+      - BASIC_MEMORY_LOG_LEVEL=INFO
+
+      # Sync delay in milliseconds (adjust for performance vs responsiveness)
+      - BASIC_MEMORY_SYNC_DELAY=1000
+
+    # Port exposure for HTTP transport (only needed if not using STDIO)
+    ports:
+      - '8000:9904'
+
+    # Command with SSE transport (configurable via environment variables above)
+    # IMPORTANT: The SSE and streamable-http endpoints are not secured
+    command: ['basic-memory', 'mcp', '--transport', 'sse', '--host', '0.0.0.0', '--port', '8000']
+
+    # Container management
+    restart: unless-stopped
+
+    # Health monitoring
+    healthcheck:
+      test: ['CMD', 'basic-memory', '--version']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
+    #       cpus: '0.5'
+    #     reservations:
+    #       memory: 256M
+    #       cpus: '0.25'
+    networks:
+      - skogai-internal-network
 
   # MCPHub application
   mcphub:
     image: samanhappy/mcphub:latest
-    container_name: mcphub
+    container_name: skogai-mcphub
     environment:
       # Database connection (setting DB_URL automatically enables database mode)
-      DB_URL: "postgresql://mcphub:${DB_PASSWORD:-mcphub_password}@postgres:5432/mcphub"
+      POSTGRES_PASSWORD: '$POSTGRES_PASSWORD'
+      POSTGRES_USER: 'mcphub'
+      POSTGRES_DB: 'mcphub'
+      DB_URL: 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD:-mcphub_password}@postgres:5432/${POSTGRES_DB}'
 
       # Optional: Explicitly control database mode (overrides auto-detection)
       # USE_DB: "true"
@@ -43,18 +114,22 @@ services:
       # HTTP_PROXY: http://proxy:8080
       # HTTPS_PROXY: http://proxy:8080
     ports:
-      - "${MCPHUB_PORT:-3000}:3000"
+      - '${MCPHUB_PORT:-3000}:3000'
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - mcphub-network
+      - skogai-internal-network
 
 volumes:
-  pgdata:
+  mcphub:
     driver: local
+  skogai-memory:
+    driver: local
+  # Named volume for persistent configuration and database
+  # This ensures your configuration and knowledge graph persist across container restarts
 
 networks:
-  mcphub-network:
+  skogai-internal-network:
     driver: bridge

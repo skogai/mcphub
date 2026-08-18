@@ -1,0 +1,2 @@
+[mcp_servers.basic-memory-local]
+url = "http://0.0.0.0:9004/mcp"
