@@ -1391,10 +1391,13 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     });
     if (transport.stderr) {
       observeStdioStderr(transport, transport.stderr, (message) => {
-        logger.log('Upstream server stderr', JSON.stringify({
-          serverName: name,
-          message,
-        }));
+        logger.log(
+          'Upstream server stderr',
+          JSON.stringify({
+            serverName: name,
+            message,
+          }),
+        );
       });
     }
   } else {

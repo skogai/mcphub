@@ -1,0 +1,12 @@
+{
+  "/home/skogix/skogai/scripts/worktree-pre-merge.sh": {
+    "run_count": 2,
+    "last_run": "2026-08-14T06:41:17.624386",
+    "last_updated": "2026-08-14T06:41:17.624640"
+  },
+  "/home/skogix/skogai/scripts/worktree-post-merge.sh": {
+    "run_count": 2,
+    "last_run": "2026-08-14T06:41:17.803898",
+    "last_updated": "2026-08-14T06:41:17.804302"
+  }
+}

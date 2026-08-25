@@ -39,24 +39,20 @@ describe('isProcessTreeKillAvailable', () => {
   it('detects ps on a custom PATH entry on Linux', () => {
     setPlatform('linux');
     process.env.PATH = '/custom/bin';
-    jest
-      .spyOn(fs, 'accessSync')
-      .mockImplementation(((candidate: fs.PathLike) => {
-        if (String(candidate) === path.join('/custom/bin', 'ps')) return undefined;
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      }) as typeof fs.accessSync);
+    jest.spyOn(fs, 'accessSync').mockImplementation(((candidate: fs.PathLike) => {
+      if (String(candidate) === path.join('/custom/bin', 'ps')) return undefined;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }) as typeof fs.accessSync);
     expect(isProcessTreeKillAvailable()).toBe(true);
   });
 
   it('detects ps at well-known absolute paths even with an empty PATH', () => {
     setPlatform('linux');
     process.env.PATH = '';
-    jest
-      .spyOn(fs, 'accessSync')
-      .mockImplementation(((candidate: fs.PathLike) => {
-        if (String(candidate) === '/usr/bin/ps') return undefined;
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      }) as typeof fs.accessSync);
+    jest.spyOn(fs, 'accessSync').mockImplementation(((candidate: fs.PathLike) => {
+      if (String(candidate) === '/usr/bin/ps') return undefined;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }) as typeof fs.accessSync);
     expect(isProcessTreeKillAvailable()).toBe(true);
   });
 
@@ -72,11 +68,9 @@ describe('isProcessTreeKillAvailable', () => {
   it('caches the result until reset', () => {
     setPlatform('linux');
     process.env.PATH = '';
-    const accessSync = jest
-      .spyOn(fs, 'accessSync')
-      .mockImplementation((() => {
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      }) as typeof fs.accessSync);
+    const accessSync = jest.spyOn(fs, 'accessSync').mockImplementation((() => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }) as typeof fs.accessSync);
 
     expect(isProcessTreeKillAvailable()).toBe(false);
 
