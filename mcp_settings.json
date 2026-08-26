@@ -250,10 +250,10 @@
       "username": "skogix"
     },
     {
-      "accessToken": "f3dd73b2a91b16527480e4f80d023b180efb2f53d671678647499e711d968f51",
-      "accessTokenExpiresAt": "2026-08-26T06:20:31.558Z",
-      "refreshToken": "a8a43148c7b21acce0976aa091278236df11dded5f9e480d0e7930568445610d",
-      "refreshTokenExpiresAt": "2026-09-09T05:20:31.558Z",
+      "accessToken": "3c16820eb8f32d655c473ff0c47bb0b02c834f36b2aad87fef9b950eee20fc5f",
+      "accessTokenExpiresAt": "2026-08-26T10:57:11.471Z",
+      "refreshToken": "b49ebd3656035ebb784bbfd51f3159f79e1909f74b28b89c8ad313fb2d4dc414",
+      "refreshTokenExpiresAt": "2026-09-09T09:57:11.471Z",
       "scope": "read write",
       "clientId": "e64886c54c2e24d7f5be9737c4aa2b02",
       "username": "admin"
