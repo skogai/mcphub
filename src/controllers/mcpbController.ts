@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
 import { ApiResponse } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -16,8 +17,11 @@ const storage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const timestamp = Date.now();
-    const originalName = path.parse(file.originalname).name;
-    cb(null, `${originalName}-${timestamp}.mcpb`);
+    // Sanitize the original name so the stored path cannot escape the upload directory
+    const safeOriginalName = path
+      .parse(path.basename(file.originalname))
+      .name.replace(/[^A-Za-z0-9._-]/g, '_');
+    cb(null, `${safeOriginalName}-${timestamp}.mcpb`);
   },
 });
 
@@ -89,13 +93,13 @@ const cleanupOldMcpbServer = (serverName: string): void => {
           const filePath = path.join(uploadDir, file);
           if (fs.statSync(filePath).isDirectory()) {
             fs.rmSync(filePath, { recursive: true, force: true });
-            console.log(`Cleaned up old MCPB server directory: ${filePath}`);
+            logger.log(`Cleaned up old MCPB server directory: ${filePath}`);
           }
         }
       });
     }
   } catch (error) {
-    console.warn('Failed to cleanup old MCPB server files:', error);
+    logger.warn('Failed to cleanup old MCPB server files:', error);
     // Don't fail the installation if cleanup fails
   }
 };
@@ -110,7 +114,15 @@ export const uploadMcpbFile = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const mcpbFilePath = req.file.path;
+    const mcpbFilePath = req.file?.path;
+    const uploadRoot = `${path.resolve(getMcpbUploadDir())}${path.sep}`;
+    if (!mcpbFilePath || !path.resolve(mcpbFilePath).startsWith(uploadRoot)) {
+      res.status(400).json({
+        success: false,
+        message: mcpbFilePath ? 'Invalid MCPB file location' : 'No MCPB file uploaded',
+      });
+      return;
+    }
     const timestamp = Date.now();
     const tempExtractDir = path.join(path.dirname(mcpbFilePath), `temp-extracted-${timestamp}`);
 
@@ -145,7 +157,10 @@ export const uploadMcpbFile = async (req: Request, res: Response): Promise<void>
       const safeServerName = validateMcpbServerName(manifest.name);
 
       // Use server name as the final extract directory for automatic version management
-      const finalExtractDir = resolveMcpbServerExtractDir(path.dirname(mcpbFilePath), safeServerName);
+      const finalExtractDir = resolveMcpbServerExtractDir(
+        path.dirname(mcpbFilePath),
+        safeServerName,
+      );
 
       // Clean up any existing version of this server
       cleanupOldMcpbServer(safeServerName);
@@ -155,7 +170,7 @@ export const uploadMcpbFile = async (req: Request, res: Response): Promise<void>
 
       // Move the temporary directory to the final location
       fs.renameSync(tempExtractDir, finalExtractDir);
-      console.log(`MCPB server extracted to: ${finalExtractDir}`);
+      logger.log(`MCPB server extracted to: ${finalExtractDir}`);
 
       // Clean up the uploaded MCPB file
       fs.unlinkSync(mcpbFilePath);
@@ -180,7 +195,7 @@ export const uploadMcpbFile = async (req: Request, res: Response): Promise<void>
       throw extractError;
     }
   } catch (error) {
-    console.error('MCPB upload error:', error);
+    logger.error('MCPB upload error:', error);
 
     let message = 'Failed to process MCPB file';
     if (error instanceof Error) {

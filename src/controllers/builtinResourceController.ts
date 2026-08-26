@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { ApiResponse, BuiltinResource } from '../types/index.js';
 import { getBuiltinResourceDao } from '../dao/index.js';
 import { handleReadResourceRequest } from '../services/mcpService.js';
+import { requireAdmin } from '../utils/requireAdmin.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * List all built-in resources
@@ -15,7 +17,7 @@ export const listBuiltinResources = async (_req: Request, res: Response): Promis
     };
     res.json(response);
   } catch (error) {
-    console.error('Error listing built-in resources:', error);
+    logger.error('Error listing built-in resources:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to list built-in resources',
@@ -37,7 +39,7 @@ export const getBuiltinResource = async (req: Request, res: Response): Promise<v
     const response: ApiResponse<BuiltinResource> = { success: true, data: resource };
     res.json(response);
   } catch (error) {
-    console.error('Error getting built-in resource:', error);
+    logger.error('Error getting built-in resource:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to get built-in resource',
@@ -49,6 +51,7 @@ export const getBuiltinResource = async (req: Request, res: Response): Promise<v
  * Create a new built-in resource
  */
 export const createBuiltinResource = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { uri, name, description, mimeType, content, enabled } = req.body;
     if (!uri || !content) {
@@ -66,7 +69,7 @@ export const createBuiltinResource = async (req: Request, res: Response): Promis
     const response: ApiResponse<BuiltinResource> = { success: true, data: resource };
     res.status(201).json(response);
   } catch (error) {
-    console.error('Error creating built-in resource:', error);
+    logger.error('Error creating built-in resource:', error);
     const status = error instanceof Error && error.message.includes('already exists') ? 409 : 500;
     res.status(status).json({
       success: false,
@@ -79,6 +82,7 @@ export const createBuiltinResource = async (req: Request, res: Response): Promis
  * Update an existing built-in resource
  */
 export const updateBuiltinResource = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { id } = req.params;
     const updates = req.body;
@@ -90,7 +94,7 @@ export const updateBuiltinResource = async (req: Request, res: Response): Promis
     const response: ApiResponse<BuiltinResource> = { success: true, data: resource };
     res.json(response);
   } catch (error) {
-    console.error('Error updating built-in resource:', error);
+    logger.error('Error updating built-in resource:', error);
     const status = error instanceof Error && error.message.includes('already exists') ? 409 : 500;
     res.status(status).json({
       success: false,
@@ -103,6 +107,7 @@ export const updateBuiltinResource = async (req: Request, res: Response): Promis
  * Delete a built-in resource
  */
 export const deleteBuiltinResource = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { id } = req.params;
     const deleted = await getBuiltinResourceDao().delete(id);
@@ -112,7 +117,7 @@ export const deleteBuiltinResource = async (req: Request, res: Response): Promis
     }
     res.json({ success: true, message: 'Built-in resource deleted' });
   } catch (error) {
-    console.error('Error deleting built-in resource:', error);
+    logger.error('Error deleting built-in resource:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to delete built-in resource',
@@ -134,7 +139,7 @@ export const readResource = async (req: Request, res: Response): Promise<void> =
     const response: ApiResponse = { success: true, data: result };
     res.json(response);
   } catch (error) {
-    console.error('Error reading resource:', error);
+    logger.error('Error reading resource:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to read resource',

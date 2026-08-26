@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import { McpSettings, IUser } from '../types/index.js';
 import { getConfigFilePath } from '../utils/path.js';
+import { normalizeBasePath } from '../utils/basePath.js';
 import { getCachedSystemConfig, isDatabaseModeEnabled } from '../utils/systemConfigCache.js';
 import { getPackageVersion } from '../utils/version.js';
 import { getDataService } from '../services/services.js';
@@ -13,7 +14,7 @@ dotenv.config();
 const defaultConfig = {
   port: process.env.PORT || 3000,
   initTimeout: process.env.INIT_TIMEOUT || 300000,
-  basePath: process.env.BASE_PATH || '',
+  basePath: normalizeBasePath(process.env.BASE_PATH),
   readonly: 'true' === process.env.READONLY || false,
   mcpHubName: 'mcphub',
   mcpHubVersion: getPackageVersion(),
@@ -22,6 +23,7 @@ const defaultConfig = {
 const dataService: DataService = getDataService();
 
 export const isWebDisabled = (): boolean => process.env.DISABLE_WEB === 'true';
+import { logger } from '../utils/logger.js';
 
 const ensureOAuthServerDefaults = (settings: McpSettings): boolean => {
   if (!settings.systemConfig) {
@@ -55,7 +57,7 @@ export const loadOriginalSettings = (): McpSettings => {
   const settingsPath = getSettingsPath();
   // check if file exists
   if (!fs.existsSync(settingsPath)) {
-    console.warn(`Settings file not found at ${settingsPath}, using default settings.`);
+    logger.warn(`Settings file not found at ${settingsPath}, using default settings.`);
     const defaultSettings: McpSettings = { mcpServers: {}, users: [] };
     ensureOAuthServerDefaults(defaultSettings);
     // Cache default settings
@@ -72,7 +74,7 @@ export const loadOriginalSettings = (): McpSettings => {
       try {
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
       } catch (writeError) {
-        console.error('Failed to persist default OAuth server configuration', {
+        logger.error('Failed to persist default OAuth server configuration', {
           writeError,
           settingsPath,
         });
@@ -82,7 +84,7 @@ export const loadOriginalSettings = (): McpSettings => {
     // Update cache
     settingsCache = settings;
 
-    console.log(`Loaded settings from ${settingsPath}`);
+    logger.log(`Loaded settings from ${settingsPath}`);
     return settings;
   } catch (error) {
     throw new Error(`Failed to load settings from ${settingsPath}: ${error}`);
@@ -104,7 +106,7 @@ export const saveSettings = (settings: McpSettings, user?: IUser): boolean => {
 
     return true;
   } catch (error) {
-    console.error('Failed to save settings', { settingsPath, error });
+    logger.error('Failed to save settings', { settingsPath, error });
     return false;
   }
 };
@@ -184,9 +186,36 @@ export function replaceEnvVars(
 }
 
 /**
+ * Expand `${VAR}` references via a linear scan. A manual scan is used instead
+ * of a regular expression so that adversarial input (many '${' sequences)
+ * cannot trigger catastrophic backtracking.
+ */
+const expandDollarBraceVars = (
+  value: string,
+  envSource: Record<string, string | undefined>,
+): string => {
+  let result = '';
+  let i = 0;
+  while (i < value.length) {
+    if (value[i] === '$' && value[i + 1] === '{') {
+      const closeIndex = value.indexOf('}', i + 2);
+      if (closeIndex > i + 2) {
+        const key = value.slice(i + 2, closeIndex);
+        result += envSource[key] || '';
+        i = closeIndex + 1;
+        continue;
+      }
+    }
+    result += value[i];
+    i += 1;
+  }
+  return result;
+};
+
+/**
  * Expand environment variable references and trim leading/trailing whitespace.
  * Trimming here prevents hard-to-diagnose API failures caused by accidental
- * whitespace in values at the beginning or end of the string.
+ * whitespace in values at the beginning or end of strings.
  */
 export const expandEnvVars = (
   value: string,
@@ -196,7 +225,7 @@ export const expandEnvVars = (
     return String(value);
   }
   // Replace ${VAR} format
-  let result = value.replace(/\$\{([^}]+)\}/g, (_, key) => envSource[key] || '');
+  let result = expandDollarBraceVars(value, envSource);
   // Also replace $VAR format (common on Unix-like systems)
   result = result.replace(/\$([A-Z_][A-Z0-9_]*)/g, (_, key) => envSource[key] || '');
   return result.trim();

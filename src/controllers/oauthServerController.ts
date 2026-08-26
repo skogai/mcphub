@@ -4,14 +4,21 @@ import {
   handleTokenRequest,
   handleAuthenticateRequest,
 } from '../services/oauthServerService.js';
-import { findOAuthClientById } from '../models/OAuth.js';
-import { getSystemConfigDao } from '../dao/index.js';
+import { findOAuthClientIncludingCimd, isCimdClientId } from '../services/cimdClientService.js';
+import { getSystemConfigDao, getGroupDao, getServerDao } from '../dao/index.js';
 import OAuth2Server from '@node-oauth/oauth2-server';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt.js';
 import { resolveBetterAuthUser } from '../services/betterAuthSession.js';
 import { cloneDefaultOAuthServerConfig } from '../constants/oauthServerDefaults.js';
 import { resolveInstallBaseUrl } from '../utils/installBaseUrl.js';
+import { logger } from '../utils/logger.js';
+import {
+  injectOAuthConsentShell,
+  type OAuthConsentContext,
+  type ConsentClientInfo,
+} from '../utils/frontendShell.js';
+import { parseResourceTarget, type ResourceTarget } from '../utils/oauthConsentResource.js';
 
 const { Request: OAuth2Request, Response: OAuth2Response } = OAuth2Server;
 
@@ -31,9 +38,7 @@ type AuthenticatedUser = {
  * On success the resolved user is attached to req.user so the caller does not have to
  * repeat that assignment at every call site.
  */
-async function resolveBetterAuthUserForAuthorize(
-  req: Request,
-): Promise<AuthenticatedUser | null> {
+async function resolveBetterAuthUserForAuthorize(req: Request): Promise<AuthenticatedUser | null> {
   try {
     const user = await resolveBetterAuthUser(req);
     if (user) {
@@ -45,7 +50,7 @@ async function resolveBetterAuthUserForAuthorize(
       return authenticatedUser;
     }
   } catch (error) {
-    console.warn('Better Auth lookup failed in /oauth/authorize:', error);
+    logger.warn('Better Auth lookup failed in /oauth/authorize:', error);
   }
   return null;
 }
@@ -72,7 +77,7 @@ function resolveUserFromRequest(req: Request): AuthenticatedUser | null {
       return decoded.user;
     }
   } catch (error) {
-    console.warn('Invalid JWT supplied to OAuth authorize endpoint:', error);
+    logger.warn('Invalid JWT supplied to OAuth authorize endpoint:', error);
   }
 
   return null;
@@ -124,7 +129,7 @@ async function validateClientRedirectUri(
     return null;
   }
 
-  const client = await findOAuthClientById(clientId);
+  const client = await findOAuthClientIncludingCimd(clientId);
   if (!client) {
     res.status(400).json({ error: 'invalid_client', error_description: 'Client not found' });
     return null;
@@ -139,6 +144,33 @@ async function validateClientRedirectUri(
   }
 
   return redirectUri;
+}
+
+/**
+ * Resolve this install's issuer identifier (RFC 9207). Uses the same
+ * resolution chain as the RFC 8414 metadata endpoint (`issuer` field) so
+ * clients validating `iss` compare against a value they can discover.
+ */
+async function resolveIssuer(req: Request): Promise<string | undefined> {
+  try {
+    const systemConfig = await getSystemConfigDao().get();
+    const host = typeof req.get === 'function' ? req.get('host') : undefined;
+    const fallback = host ? `${req.protocol ?? 'http'}://${host}` : undefined;
+    return resolveInstallBaseUrl(systemConfig, fallback);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Attach the RFC 9207 `iss` parameter to an authorization response redirect.
+ * A no-op when the issuer cannot be resolved (defensive: authorization
+ * responses must never fail because of this hardening).
+ */
+function setIssuerParam(redirectUrl: URL, issuer: string | undefined): void {
+  if (issuer) {
+    redirectUrl.searchParams.set('iss', issuer);
+  }
 }
 
 /**
@@ -242,6 +274,40 @@ const generateAuthorizeHtml = (
 };
 
 /**
+ * Resolve an RFC 8707 `resource` URI into a display target for the consent
+ * screen, disambiguating `/mcp/{name}` between a group and a single server.
+ * Best-effort: unknown or unresolvable targets are surfaced as-is, never
+ * blocking the authorization request.
+ */
+async function resolveResourceTarget(raw: string | undefined): Promise<ResourceTarget | undefined> {
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = parseResourceTarget(raw);
+  if (parsed.kind !== 'target' || !parsed.name) {
+    return parsed;
+  }
+
+  try {
+    const [group, server] = await Promise.all([
+      getGroupDao().findByName(parsed.name),
+      getServerDao().findById(parsed.name),
+    ]);
+    if (group) {
+      return { ...parsed, kind: 'group' };
+    }
+    if (server) {
+      return { ...parsed, kind: 'server' };
+    }
+    return { ...parsed, kind: 'unknown' };
+  } catch (error) {
+    logger.warn('Failed to resolve OAuth consent resource target:', error);
+    return { ...parsed, kind: 'unknown' };
+  }
+}
+
+/**
  * GET /oauth/authorize
  * Display authorization page or handle authorization
  */
@@ -254,7 +320,13 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
     }
 
     // Get and validate query parameters
-    const client_id = validateQueryParam(req.query.client_id, 'client_id', /^[a-zA-Z0-9_-]+$/);
+    // CIMD (draft-ietf-oauth-client-id-metadata-document) client_ids are HTTPS
+    // URLs; registered client_ids stay restricted to the legacy safe charset.
+    const rawClientId = validateQueryParam(req.query.client_id, 'client_id');
+    const isUrlClientId = isCimdClientId(rawClientId);
+    const client_id = isUrlClientId
+      ? rawClientId
+      : validateQueryParam(rawClientId, 'client_id', /^[a-zA-Z0-9_-]+$/);
     const redirect_uri = validateQueryParam(req.query.redirect_uri, 'redirect_uri');
     const response_type = validateQueryParam(req.query.response_type, 'response_type', /^code$/);
     // RFC 6749 §3.3: scope tokens are printable ASCII (!#-[]-~) excluding " and \, space-delimited
@@ -276,6 +348,12 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
           /^(S256|plain)$/,
         )
       : undefined;
+    // RFC 8707: the resource URI the client wants to access (e.g. which MCP
+    // server). Optional here for compatibility with clients that omit it, but
+    // surfaced on the consent screen when present.
+    const resource = req.query.resource
+      ? validateQueryParam(req.query.resource, 'resource')
+      : undefined;
 
     // Validate required parameters
     if (!client_id || !redirect_uri || !response_type) {
@@ -286,7 +364,7 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
     }
 
     // Verify client
-    const client = await findOAuthClientById(client_id as string);
+    const client = await findOAuthClientIncludingCimd(client_id as string);
     if (!client) {
       res.status(400).json({ error: 'invalid_client', error_description: 'Client not found' });
       return;
@@ -295,6 +373,16 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
     // Verify redirect URI
     if (!client.redirectUris.includes(redirect_uri as string)) {
       res.status(400).json({ error: 'invalid_request', error_description: 'Invalid redirect_uri' });
+      return;
+    }
+
+    // RFC 7636 + GHSA-3m7m: public clients (no registered secret) must present
+    // an S256 code challenge up front. Confidential clients may omit PKCE.
+    if (!client.clientSecret && (!code_challenge || code_challenge_method !== 'S256')) {
+      res.status(400).json({
+        error: 'invalid_request',
+        error_description: 'PKCE with code_challenge_method=S256 is required for public clients',
+      });
       return;
     }
 
@@ -337,10 +425,47 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
       <input type="hidden" name="response_type" value="${escapeHtml(response_type)}" />
       <input type="hidden" name="scope" value="${escapeHtml(scope || '')}" />
       <input type="hidden" name="state" value="${escapeHtml(state || '')}" />
+      ${resource ? `<input type="hidden" name="resource" value="${escapeHtml(resource)}" />` : ''}
       ${code_challenge ? `<input type="hidden" name="code_challenge" value="${escapeHtml(code_challenge)}" />` : ''}
       ${code_challenge_method ? `<input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method)}" />` : ''}
       ${tokenField}
     `;
+
+    // Build the structured consent context handed to the React SPA. The server
+    // has already validated the request and resolved the authenticated user, so
+    // the SPA only renders this payload (never re-resolves auth).
+    const consentClientInfo: ConsentClientInfo = {
+      clientUri: client.metadata?.client_uri,
+      policyUri: client.metadata?.policy_uri,
+      tosUri: client.metadata?.tos_uri,
+      logoUri: client.metadata?.logo_uri,
+      contacts: client.metadata?.contacts,
+      applicationType: client.metadata?.application_type,
+    };
+    const consentContext: OAuthConsentContext = {
+      clientName: client.name || '',
+      scopes,
+      clientId: client_id,
+      redirectUri: redirect_uri,
+      responseType: response_type,
+      scope: scope || '',
+      state: state || undefined,
+      codeChallenge: code_challenge || undefined,
+      codeChallengeMethod: code_challenge_method || undefined,
+      token: requestToken || undefined,
+      resource: await resolveResourceTarget(resource),
+      client: consentClientInfo,
+    };
+
+    // Serve the consent screen inside the React dashboard (SPA shell) when the
+    // frontend build is available, so it shares the dashboard's visual
+    // language, i18n and dark mode. Fall back to the legacy inline page when
+    // the frontend is not deployed (e.g. DISABLE_WEB / headless installs).
+    const shell = injectOAuthConsentShell(consentContext);
+    if (shell) {
+      res.type('html').send(shell);
+      return;
+    }
 
     // Render authorization consent page with consistent, localized styling
     res.send(
@@ -363,7 +488,7 @@ export const getAuthorize = async (req: Request, res: Response): Promise<void> =
       ),
     );
   } catch (error) {
-    console.error('Authorization error:', error);
+    logger.error('Authorization error:', error);
     res.status(500).json({ error: 'server_error', error_description: 'Internal server error' });
   }
 };
@@ -382,6 +507,7 @@ export const postAuthorize = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const issuer = await resolveIssuer(req);
     const { allow, client_id, redirect_uri, state } = req.body;
 
     validatedRedirectUri = await validateClientRedirectUri(res, client_id, redirect_uri);
@@ -393,6 +519,7 @@ export const postAuthorize = async (req: Request, res: Response): Promise<void> 
     if (allow !== 'true') {
       const redirectUrl = new URL(validatedRedirectUri);
       redirectUrl.searchParams.set('error', 'access_denied');
+      setIssuerParam(redirectUrl, issuer);
       if (state) {
         redirectUrl.searchParams.set('state', state);
       }
@@ -433,13 +560,14 @@ export const postAuthorize = async (req: Request, res: Response): Promise<void> 
     // Build redirect URL with authorization code
     const redirectUrl = new URL(validatedRedirectUri);
     redirectUrl.searchParams.set('code', code.authorizationCode);
+    setIssuerParam(redirectUrl, issuer);
     if (state) {
       redirectUrl.searchParams.set('state', state);
     }
 
     res.redirect(redirectUrl.toString());
   } catch (error) {
-    console.error('Authorization error:', error);
+    logger.error('Authorization error:', error);
 
     // Handle OAuth errors
     if (error instanceof Error && 'code' in error) {
@@ -452,6 +580,7 @@ export const postAuthorize = async (req: Request, res: Response): Promise<void> 
         if (oauthError.message) {
           redirectUrl.searchParams.set('error_description', oauthError.message);
         }
+        setIssuerParam(redirectUrl, await resolveIssuer(req));
         if (state) {
           redirectUrl.searchParams.set('state', state);
         }
@@ -483,7 +612,7 @@ export const postToken = async (req: Request, res: Response): Promise<void> => {
       scope: Array.isArray(token.scope) ? token.scope.join(' ') : token.scope,
     });
   } catch (error) {
-    console.error('Token error:', error);
+    logger.error('Token error:', error);
 
     if (error instanceof Error && 'code' in error) {
       const oauthError = error as any;
@@ -514,7 +643,7 @@ export const getUserInfo = async (req: Request, res: Response): Promise<void> =>
       // Add more user info as needed
     });
   } catch (error) {
-    console.error('UserInfo error:', error);
+    logger.error('UserInfo error:', error);
     res.status(401).json({
       error: 'invalid_token',
       error_description: 'Invalid or expired access token',
@@ -553,7 +682,8 @@ export const getMetadata = async (req: Request, res: Response): Promise<void> =>
         oauthConfig.requireClientSecret !== false
           ? ['client_secret_basic', 'client_secret_post', 'none']
           : ['none'],
-      code_challenge_methods_supported: ['S256', 'plain'],
+      // Only S256 is supported; the library rejects plain (GHSA-3m7m).
+      code_challenge_methods_supported: ['S256'],
     };
 
     // Add dynamic registration endpoint if enabled
@@ -563,7 +693,7 @@ export const getMetadata = async (req: Request, res: Response): Promise<void> =>
 
     res.json(metadata);
   } catch (error) {
-    console.error('Metadata error:', error);
+    logger.error('Metadata error:', error);
     res.status(500).json({ error: 'server_error' });
   }
 };
@@ -596,7 +726,7 @@ export const getProtectedResourceMetadata = async (req: Request, res: Response):
       bearer_methods_supported: ['header'],
     });
   } catch (error) {
-    console.error('Protected resource metadata error:', error);
+    logger.error('Protected resource metadata error:', error);
     res.status(500).json({ error: 'server_error' });
   }
 };

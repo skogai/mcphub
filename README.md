@@ -8,8 +8,9 @@ MCPHub makes it easy to manage and scale multiple MCP (Model Context Protocol) s
 
 ![Dashboard Preview](assets/dashboard.png)
 
-## 🌐 Live Demo & Docs
+## 🌐 Website, Demo & Docs
 
+- **Website**: [mcphub.app](https://www.mcphub.app/)
 - **Documentation**: [docs.mcphub.app](https://docs.mcphub.app/)
 - **Demo Environment**: [demo.mcphub.app](https://demo.mcphub.app/)
 
@@ -18,6 +19,7 @@ MCPHub makes it easy to manage and scale multiple MCP (Model Context Protocol) s
 - **Centralized Management** - Monitor and control all MCP servers from a unified dashboard
 - **Flexible Routing** - Access all servers, specific groups, or individual servers via HTTP/SSE
 - **Granular Group Visibility** - Control Tool, Prompt, and Resource visibility independently for each server inside a group
+- **Per-Server Sharing** - Keep servers private, share them with selected users, or make them public
 - **Smart Routing** - AI-powered tool discovery using vector semantic search ([Learn more](https://docs.mcphub.app/features/smart-routing))
 - **MCP Apps Proxy** - Transparently forward interactive MCP Apps on single-server routes ([Learn more](https://docs.mcphub.app/features/mcp-apps))
 - **Tool Result Compression** - Transparently reduce large text tool outputs before they reach clients
@@ -150,6 +152,15 @@ Local development uses `admin` / `admin123` and stores its writable settings cop
 - **Auth**: JWT + bcrypt for local accounts; bearer keys; built-in OAuth 2.0 server (`@node-oauth/oauth2-server`); optional Better Auth for GitHub/Google login
 - **Protocol**: Model Context Protocol SDK
 
+## 🏢 Production Support
+
+Running MCPHub in production?
+
+Work directly with the maintainer on production deployment, OAuth/OIDC,
+access control, credential management, audit, Kubernetes, and HA readiness.
+
+[Discuss a production pilot →](https://www.mcphub.app/pricing)
+
 ## 👥 Contributing
 
 Contributions welcome! See our [Discord community](https://discord.gg/2BJehJZVH5) for discussions and support.
@@ -160,7 +171,7 @@ Contributions welcome! See our [Discord community](https://discord.gg/2BJehJZVH5
 
 ## 🌟 Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=samanhappy/mcphub&type=Date)](https://www.star-history.com/#samanhappy/mcphub&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=samanhappy/mcphub&type=Date)](https://star-history.dera.page/#samanhappy/mcphub&Date)
 
 ## 📄 License
 

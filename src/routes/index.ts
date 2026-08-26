@@ -5,6 +5,7 @@ import {
   getAllServers,
   getAllSettings,
   getServerConfig,
+  getServerShareCandidates,
   createServer,
   batchCreateServers,
   updateServer,
@@ -25,7 +26,10 @@ import {
   resetResourceDescription,
   updateSystemConfig,
 } from '../controllers/serverController.js';
-import { getServerCostsHandler, getGroupCostsHandler } from '../controllers/contextCostController.js';
+import {
+  getServerCostsHandler,
+  getGroupCostsHandler,
+} from '../controllers/contextCostController.js';
 import {
   getGroups,
   getGroup,
@@ -166,10 +170,11 @@ import {
 import { auth } from '../middlewares/auth.js';
 import { getBetterAuthRuntimeConfig } from '../services/betterAuthConfig.js';
 import {
+  authAttemptRateLimiter,
   authenticatedRouteRateLimiter,
   hostedInternalEventRateLimiter,
-  templateRateLimiter,
   mcpConnectionRateLimiter,
+  templateRateLimiter,
 } from '../utils/rateLimit.js';
 
 const router = express.Router();
@@ -205,27 +210,42 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   );
 
   // OAuth callback endpoint (no auth required, public callback URL)
-  app.get('/oauth/callback', handleOAuthCallback);
+  app.get('/oauth/callback', mcpConnectionRateLimiter, handleOAuthCallback);
 
   // OAuth Authorization Server endpoints (no auth required for OAuth flow)
   app.get('/oauth/authorize', mcpConnectionRateLimiter, getAuthorize);
-  app.post('/oauth/authorize', express.urlencoded({ extended: true }), mcpConnectionRateLimiter, postAuthorize);
-  app.post('/oauth/token', express.urlencoded({ extended: true }), mcpConnectionRateLimiter, postToken); // Public endpoint for token exchange
+  app.post(
+    '/oauth/authorize',
+    express.urlencoded({ extended: true }),
+    mcpConnectionRateLimiter,
+    postAuthorize,
+  );
+  app.post(
+    '/oauth/token',
+    express.urlencoded({ extended: true }),
+    mcpConnectionRateLimiter,
+    postToken,
+  ); // Public endpoint for token exchange
   app.get('/oauth/userinfo', mcpConnectionRateLimiter, getUserInfo); // Validates OAuth token
   app.get('/.well-known/oauth-authorization-server', mcpConnectionRateLimiter, getMetadata); // Public metadata endpoint
-  app.get('/.well-known/oauth-protected-resource', mcpConnectionRateLimiter, getProtectedResourceMetadata); // Public protected resource metadata
+  app.get(
+    '/.well-known/oauth-protected-resource',
+    mcpConnectionRateLimiter,
+    getProtectedResourceMetadata,
+  ); // Public protected resource metadata
 
   // RFC 7591 Dynamic Client Registration endpoints (public for registration)
-  app.post('/oauth/register', registerClient); // Register new OAuth client
-  app.get('/oauth/register/:clientId', getClientConfiguration); // Read client configuration
-  app.put('/oauth/register/:clientId', updateClientConfiguration); // Update client configuration
-  app.delete('/oauth/register/:clientId', deleteClientRegistration); // Delete client registration
+  app.post('/oauth/register', mcpConnectionRateLimiter, registerClient); // Register new OAuth client
+  app.get('/oauth/register/:clientId', mcpConnectionRateLimiter, getClientConfiguration); // Read client configuration
+  app.put('/oauth/register/:clientId', mcpConnectionRateLimiter, updateClientConfiguration); // Update client configuration
+  app.delete('/oauth/register/:clientId', mcpConnectionRateLimiter, deleteClientRegistration); // Delete client registration
 
   authenticatedRouter.use(authenticatedRouteRateLimiter);
   router.use(authenticatedRouter);
 
   // API routes protected by auth middleware in middlewares/index.ts and rate limited here
   authenticatedRouter.get('/servers', getAllServers);
+  authenticatedRouter.get('/servers/:name/share-candidates', getServerShareCandidates);
   authenticatedRouter.get('/servers/:name', getServerConfig);
   authenticatedRouter.get('/settings', getAllSettings);
   authenticatedRouter.post('/servers', createServer);
@@ -403,6 +423,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
       check('username', 'Username is required').not().isEmpty(),
       check('password', 'Password is required').not().isEmpty(),
     ],
+    authAttemptRateLimiter,
     login,
   );
 
@@ -412,6 +433,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
       check('username', 'Username is required').not().isEmpty(),
       check('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
     ],
+    authAttemptRateLimiter,
     register,
   );
 

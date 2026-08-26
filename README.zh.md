@@ -6,9 +6,10 @@ MCPHub 通过将多个 MCP（Model Context Protocol）服务器组织为灵活�
 
 ![控制面板预览](assets/dashboard.zh.png)
 
-## 🌐 在线文档与演示
+## 🌐 官网、演示与文档
 
-- **文档地址**: [docs.mcphub.app](https://docs.mcphub.app/)
+- **官网**: [mcphub.app](https://www.mcphub.app/zh)
+- **文档**: [docs.mcphub.app](https://docs.mcphub.app/)
 - **演示环境**: [demo.mcphub.app](https://demo.mcphub.app/)
 
 ## 🚀 功能亮点
@@ -16,6 +17,7 @@ MCPHub 通过将多个 MCP（Model Context Protocol）服务器组织为灵活�
 - **集中式管理** - 在统一控制台中监控和管理所有 MCP 服务器
 - **灵活路由** - 通过 HTTP/SSE 访问所有服务器、特定分组或单个服务器
 - **细粒度分组可见性** - 在分组中可独立控制每个服务器的 Tool、Prompt 与 Resource 是否对外暴露
+- **服务器级共享** - 服务器可保持私有、共享给指定用户或设为公开
 - **智能路由** - 基于向量语义搜索的 AI 工具发现 ([了解更多](https://docs.mcphub.app/zh/features/smart-routing))
 - **工具结果压缩** - 在返回客户端前透明压缩大型文本工具输出
 - **热插拔配置** - 无需停机即可添加、移除或更新服务器
@@ -146,6 +148,15 @@ pnpm dev
 - **认证**：本地账号使用 JWT + bcrypt；支持 Bearer Key、内置 OAuth 2.0 服务端（`@node-oauth/oauth2-server`），以及可选的 Better Auth（GitHub/Google 一键登录）
 - **协议**：Model Context Protocol SDK
 
+## 🏢 生产支持
+
+正在生产环境使用 MCPHub？
+
+可以直接与维护者合作，解决生产部署、OAuth/OIDC、访问控制、
+凭据管理、审计、Kubernetes 和高可用准备等问题。
+
+[讨论 Production Pilot →](https://www.mcphub.app/zh/pricing)
+
 ## 👥 贡献指南
 
 欢迎加入企微交流共建群，由于群人数限制，有兴趣的同学可以扫码添加管理员为好友后拉入群聊。
@@ -162,7 +173,7 @@ pnpm dev
 
 ## 🌟 Star 历史趋势
 
-[![Star History Chart](https://api.star-history.com/svg?repos=samanhappy/mcphub&type=Date)](https://www.star-history.com/#samanhappy/mcphub&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=samanhappy/mcphub&type=Date)](https://star-history.dera.page/#samanhappy/mcphub&Date)
 
 ## 📄 许可证
 

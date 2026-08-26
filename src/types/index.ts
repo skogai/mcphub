@@ -206,6 +206,7 @@ export interface BetterAuthOidcProviderConfig extends BetterAuthProviderToggle {
 
 export interface BetterAuthConfig {
   enabled?: boolean; // Enable/disable Better Auth integration
+  baseUrl?: string; // Public base URL used to build Better Auth redirect URIs
   basePath?: string; // Base path to mount Better Auth handler
   trustedOrigins?: string[]; // Explicitly trusted origins for social/OIDC login requests
   disableAutoCreate?: boolean; // When true, SSO login will not auto-create new users
@@ -337,6 +338,13 @@ export interface OAuthServerConfig {
     allowedGrantTypes?: string[]; // Allowed grant types for dynamic registration (default: ['authorization_code', 'refresh_token'])
     requiresAuthentication?: boolean; // Whether initial registration requires authentication (default: false for public registration)
   };
+  clientIdMetadata?: {
+    // Client ID Metadata Documents (CIMD, draft-ietf-oauth-client-id-metadata-document):
+    // accept HTTPS-URL-shaped client_ids whose metadata is fetched from the URL itself.
+    // Opt-in (default false) because it makes the authorize endpoint fetch attacker-chosen URLs.
+    enabled?: boolean;
+    cacheTtlMs?: number; // Metadata document cache TTL in milliseconds (default: 3600000)
+  };
 }
 
 // Bearer authentication key configuration
@@ -383,7 +391,8 @@ export interface ProxychainsConfig {
 }
 
 // Visibility level for a server, used by non-admin filtering. See issue #817.
-// 'group' is reserved; group membership plumbing arrives in a follow-up.
+// 'group' is restricted sharing for explicitly selected users. Group membership
+// can extend the same scope in a future change.
 export type ServerVisibility = 'private' | 'group' | 'public';
 
 // Configuration details for an individual server
@@ -401,9 +410,10 @@ export interface ServerConfig {
   // Per-server visibility for non-admin users.
   //   'private' — only the owner (or admins) can see this server. Default.
   //   'public'  — every authenticated user can see this server.
-  //   'group'   — reserved for group-scoped visibility once user→group membership lands.
-  // See issue #817.
+  //   'group'   — explicitly selected users can see this server.
+  // See issues #817 and #1037.
   visibility?: ServerVisibility;
+  sharedWithUsers?: string[]; // Local MCPHub usernames allowed when visibility is 'group'.
   enableKeepAlive?: boolean; // Enable remote health checks and automatic reconnect attempts
   keepAliveInterval?: number; // Health check and reconnect interval in milliseconds (default: 60000ms for SSE servers)
   tools?: Record<string, { enabled: boolean; description?: string }>; // Tool-specific configurations with enable/disable state and custom descriptions
@@ -478,6 +488,7 @@ export interface ServerConfig {
     version?: string; // OpenAPI version (default: '3.1.0')
     security?: OpenAPISecurityConfig; // Security configuration for API calls
     passthroughHeaders?: string[]; // Header names to pass through from tool call requests to upstream OpenAPI endpoints
+    cookieSession?: boolean; // Opt-in: capture upstream Set-Cookie and replay on later calls, isolated per downstream MCP session
   };
 }
 
@@ -521,6 +532,7 @@ export interface ServerInfo {
   instructions?: string; // Upstream server instructions reported during MCP initialization
   owner?: string; // Owner of the server, defaults to 'admin' user
   visibility?: ServerVisibility; // Carried over from ServerConfig so dataService.filterData can apply #817 visibility rules at runtime.
+  sharedWithUsers?: string[]; // Carried over for restricted user-sharing authorization.
   status: 'connected' | 'connecting' | 'disconnected' | 'oauth_required'; // Current connection status
   error: string | null; // Error message if any
   tools: Tool[]; // List of tools available on the server
@@ -748,6 +760,7 @@ export interface TemplateExportOptions {
   description?: string; // Template description
   groupIds?: string[]; // Specific group IDs to export (empty = all)
   includeDisabledServers?: boolean; // Include disabled servers (default: false)
+  requestingUser?: IUser; // Caller identity; non-admins only export what they can see
 }
 
 // Result of importing a template

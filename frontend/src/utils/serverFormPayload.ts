@@ -33,10 +33,25 @@ const parseCommaSeparatedList = (value?: string): string[] => {
     .filter((item) => item.length > 0);
 };
 
+const normalizeSharedUsers = (usernames?: string[]): string[] => {
+  return Array.from(
+    new Set(
+      (usernames || [])
+        .map((username) => username.trim())
+        .filter((username) => username.length > 0),
+    ),
+  );
+};
+
 const buildOptions = (options?: ServerFormData['options']) => {
   const nextOptions: NonNullable<ServerFormData['options']> = {};
 
-  if (options?.timeout && options.timeout !== 60000) {
+  // Always echo the timeout, even when it equals the 60000 default: dropping it
+  // makes the payload differ from a stored explicit `timeout: 60000` and trips
+  // the backend's "connection changed" fast-path check on unrelated edits. The
+  // backend comparison normalizes the default timeout, so an explicit 60000 and
+  // an absent one compare as equal.
+  if (typeof options?.timeout === 'number' && !Number.isNaN(options.timeout)) {
     nextOptions.timeout = options.timeout;
   }
 
@@ -93,6 +108,7 @@ const buildOpenApiConfig = (formData: ServerFormData): NonNullable<ServerConfig[
   const openapi: NonNullable<ServerConfig['openapi']> = {
     version: formData.openapi?.version || '3.1.0',
     passthroughHeaders: parseCommaSeparatedList(formData.openapi?.passthroughHeaders),
+    cookieSession: formData.openapi?.cookieSession === true ? true : undefined,
   };
   const oauth2TokenUrl = formData.openapi?.oauth2TokenUrl?.trim();
   const oauth2ClientId = formData.openapi?.oauth2ClientId?.trim();
@@ -169,9 +185,14 @@ export const buildServerPayload = ({
     description,
     options,
     visibility: formData.visibility ?? 'private',
+    sharedWithUsers:
+      formData.visibility === 'group' ? normalizeSharedUsers(formData.sharedWithUsers) : undefined,
     perSessionClient: formData.perSessionClient === true ? true : undefined,
     startOnDemand: formData.startOnDemand === true ? true : undefined,
     idleTimeoutMs: formData.startOnDemand === true ? (formData.idleTimeoutMs ?? 300000) : undefined,
+    // Round-trip the stored proxychains config (no in-form editor) so an edit
+    // of any other field does not drop it and force an avoidable reload.
+    proxy: formData.proxy,
   };
 
   if (serverType === 'openapi') {

@@ -1,10 +1,22 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { CookieJar } from 'tough-cookie';
 import SwaggerParser from '@apidevtools/swagger-parser';
+import * as yaml from 'js-yaml';
 import { OpenAPIV3 } from 'openapi-types';
 import { ServerConfig, OpenAPISecurityConfig } from '../types/index.js';
-import { assertSafeUrl } from '../utils/ssrf.js';
+import { assertSafeUrl, UnsafeUrlError, createRedirectValidatingFetch } from '../utils/ssrf.js';
 import { getUserDao } from '../dao/index.js';
 import { sanitizeStringForLogging, createSafeJSON } from '../utils/serialization.js';
+import {
+  buildMultipartParts,
+  encodeFormUrlEncoded,
+  makeMultipartBodySchemaModelFriendly,
+  selectRequestBodyContent,
+  serializeMultipartBody,
+  type RequestBodyContentSelection,
+} from '../utils/openApiRequestBody.js';
 
 export interface OpenAPIToolInfo {
   name: string;
@@ -21,7 +33,22 @@ export interface OpenAPIToolInfo {
 type OpenAPIOAuth2Config = NonNullable<OpenAPISecurityConfig['oauth2']>;
 
 interface OpenAPIClientOptions {
-  persistOAuth2Token?: (oauth2: OpenAPIOAuth2Config) => Promise<void> | void;
+  persistOAuth2Token?: (oauth2: OpenAPISecurityConfig['oauth2']) => Promise<void> | void;
+}
+
+// Encodes a substituted path parameter following OpenAPI's default
+// `style: simple, explode: false`: primitives whole, arrays and objects part
+// by part, joined with literal commas (#1083).
+function encodePathParameterValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => encodeURIComponent(String(item))).join(',');
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, val]) => `${encodeURIComponent(key)},${encodeURIComponent(String(val))}`)
+      .join(',');
+  }
+  return encodeURIComponent(String(value));
 }
 
 export class OpenAPIClient {
@@ -32,9 +59,23 @@ export class OpenAPIClient {
   private securityConfig?: OpenAPISecurityConfig;
   private readonly persistOAuth2Token?: OpenAPIClientOptions['persistOAuth2Token'];
   private oauth2TokenRequest?: Promise<string | undefined>;
+  // Per-session cookie jars for the dynamic Set-Cookie login flow. Keyed by
+  // downstream MCP sessionId so authenticated state never crosses users or
+  // sessions. In-memory only; never persisted.
+  private readonly cookieJars = new Map<string, CookieJar>();
+  private static readonly MAX_COOKIE_JARS = 1000;
+  // Static cookie from `apiKey.in: 'cookie'` config, merged into the Cookie
+  // header at call time. Seeded into each session jar so a dynamic Set-Cookie
+  // of the same name can override it.
+  private staticCookieHeader?: string;
   // Resolved in initialize(): admin-owned servers may target internal services
   // and skip the SSRF internal-IP blocklist.
   private allowInternalNetworks = false;
+  // Records the most recent SSRF rejection raised while resolving external
+  // $refs. SwaggerParser wraps resolver failures in its own ResolverError and
+  // drops the original cause, so initialize() uses this to re-throw the real
+  // UnsafeUrlError to callers.
+  private refGuardRejection?: UnsafeUrlError;
 
   constructor(
     private config: ServerConfig,
@@ -53,6 +94,9 @@ export class OpenAPIClient {
       baseURL: this.baseUrl,
       timeout: config.options?.timeout || 30000,
       maxRedirects: 0,
+      // Serialize array query params per OpenAPI's default `style: form, explode: true`
+      // (`id=a&id=b`) instead of axios's bracket form `id[]=a&id[]=b` (#1080).
+      paramsSerializer: { indexes: null },
       headers: {
         'Content-Type': 'application/json',
         ...config.headers,
@@ -88,8 +132,9 @@ export class OpenAPIClient {
               config.params = { ...config.params, [name]: value };
               return config;
             });
+          } else if (location === 'cookie') {
+            this.staticCookieHeader = `${name}=${value}`;
           }
-          // Note: Cookie authentication would need additional setup
         }
         break;
 
@@ -263,15 +308,56 @@ export class OpenAPIClient {
 
   async initialize(): Promise<void> {
     try {
+      // Resolve whether this server's owner is an admin first; admin-owned
+      // servers may legitimately target internal services and skip the SSRF
+      // blocklist. Needed before the URL fetch so the spec-download guard is
+      // scoped the same way as callTool's.
+      const ownerUser = this.config.owner
+        ? await getUserDao().findByUsername(this.config.owner)
+        : null;
+      this.allowInternalNetworks = !!ownerUser?.isAdmin;
+
+      // Obtain/refresh the OAuth2 access token up front so it authenticates the
+      // document download (for url configs) and is ready for later API calls.
+      // No-op when no OAuth2 security is configured.
+      await this.ensureOAuth2AccessToken();
+
+      // Reset the external-$ref guard marker so a rejection from THIS
+      // dereference pass is never confused with a stale one.
+      this.refGuardRejection = undefined;
+
       // Parse and dereference the OpenAPI specification
       if (this.config.openapi?.url) {
+        // Fetch the document through the authenticated httpClient (carries
+        // config.headers + security credentials from setupSecurity, and uses
+        // maxRedirects: 0 so credentials are never forwarded across a
+        // cross-origin redirect). SwaggerParser's own resolver is bypassed for
+        // the main document so its (unauthenticated) headers never see the
+        // credentials; external $ref resolution still uses that resolver and
+        // therefore receives no auth by default.
+        const specUrl = this.config.openapi.url;
+        await assertSafeUrl(specUrl, { allowInternal: this.allowInternalNetworks });
+        const requestConfig: AxiosRequestConfig = {
+          responseType: 'text',
+          transformResponse: [(data: unknown) => data],
+        };
+        // The static apiKey.in:'cookie' value is otherwise only injected in
+        // callTool; apply it here too so cookie-protected spec URLs load.
+        if (this.staticCookieHeader) {
+          requestConfig.headers = { Cookie: this.staticCookieHeader };
+        }
+        const response = await this.httpClient.get(specUrl, requestConfig);
+        const raw = typeof response.data === 'string' ? response.data : String(response.data);
         this.spec = (await SwaggerParser.dereference(
-          this.config.openapi.url,
+          specUrl,
+          this.parseSpecDocument(raw),
+          this.guardedRefResolveOptions(),
         )) as OpenAPIV3.Document;
       } else if (this.config.openapi?.schema) {
         // For schema object, we need to pass it as a cloned object
         this.spec = (await SwaggerParser.dereference(
           JSON.parse(JSON.stringify(this.config.openapi.schema)),
+          this.guardedRefResolveOptions(),
         )) as OpenAPIV3.Document;
       } else {
         throw new Error('Either OpenAPI URL or schema must be provided');
@@ -280,19 +366,89 @@ export class OpenAPIClient {
       // Update baseUrl from OpenAPI servers field
       this.updateBaseUrlFromServers();
 
-      // Resolve whether this server's owner is an admin; admin-owned servers
-      // may legitimately target internal services and skip the SSRF blocklist.
-      const ownerUser = this.config.owner
-        ? await getUserDao().findByUsername(this.config.owner)
-        : null;
-      this.allowInternalNetworks = !!ownerUser?.isAdmin;
-
       this.extractTools();
-      await this.ensureOAuth2AccessToken();
     } catch (error) {
+      // Let SSRF rejections propagate as-is so callers can distinguish a blocked
+      // target from a parse/auth failure (matches callTool's handling).
+      if (error instanceof UnsafeUrlError) {
+        throw error;
+      }
+      // SwaggerParser wraps resolver failures (including our SSRF guard
+      // rejections) in its own ResolverError and drops the cause — surface the
+      // real UnsafeUrlError when the guarded $ref resolver flagged one.
+      if (this.refGuardRejection) {
+        throw this.refGuardRejection;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to load OpenAPI specification: ${errorMessage}`);
+      throw new Error(
+        `Failed to load OpenAPI specification: ${sanitizeStringForLogging(errorMessage)}`,
+      );
     }
+  }
+
+  // Parse a fetched spec body into an object. JSON first (stricter errors for
+  // malformed JSON), YAML fallback so protected YAML documents work without
+  // relying on SwaggerParser's own fetch (which cannot carry our credentials).
+  private parseSpecDocument(raw: string): any {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return yaml.load(raw);
+    }
+  }
+
+  // SwaggerParser options that replace its built-in resolvers so EVERY external
+  // $ref target is validated by the SSRF guard before any request leaves the
+  // process. Without this, a non-admin-supplied spec could point $refs at
+  // internal addresses (IMDS, RFC1918, loopback) or local files and have their
+  // contents embedded into the dereferenced schema served back to clients.
+  // Admin-owned servers keep the same allowInternal escape hatch as the main
+  // document download and callTool.
+  private guardedRefResolveOptions(): Record<string, unknown> {
+    const rejectUnsafe = (err: UnsafeUrlError): never => {
+      this.refGuardRejection = err;
+      throw err;
+    };
+    return {
+      resolve: {
+        http: {
+          order: 1,
+          canRead: (file: { url: string }) => /^https?:\/\//i.test(file.url),
+          read: async (file: { url: string }): Promise<string> => {
+            try {
+              await assertSafeUrl(file.url, { allowInternal: this.allowInternalNetworks });
+            } catch (error) {
+              rejectUnsafe(error as UnsafeUrlError);
+            }
+            // Plain fetch, NOT this.httpClient: default auth headers and
+            // interceptors must never be forwarded cross-origin to $ref
+            // targets (#1044). Redirects are followed manually with every hop
+            // re-validated by the guard.
+            const safeFetch = createRedirectValidatingFetch(
+              (url, init) => fetch(url, init),
+              this.allowInternalNetworks,
+            );
+            const response = await safeFetch(file.url, { method: 'GET', headers: {} });
+            const buf = await response.arrayBuffer();
+            return new TextDecoder().decode(buf);
+          },
+        },
+        file: {
+          order: 1,
+          canRead: true,
+          read: async (file: { url: string }): Promise<string> => {
+            if (!this.allowInternalNetworks) {
+              rejectUnsafe(
+                new UnsafeUrlError(
+                  `Blocked local file reference in specification: ${sanitizeStringForLogging(file.url)}`,
+                ),
+              );
+            }
+            return readFile(new URL(file.url), 'utf8');
+          },
+        },
+      },
+    };
   }
 
   private generateOperationName(method: string, path: string): string {
@@ -399,17 +555,36 @@ export class OpenAPIClient {
 
         generatedNames.add(operationName);
 
+        // Resolve the operation's declared request-body content type once so
+        // schema advertisement below and outgoing serialization in callTool
+        // stay symmetric (#1078).
+        const declaredRequestBody =
+          operation.requestBody && 'content' in operation.requestBody
+            ? (operation.requestBody as OpenAPIV3.RequestBodyObject)
+            : undefined;
+        const requestBodySelection = selectRequestBodyContent(declaredRequestBody);
+
+        let description =
+          operation.summary || operation.description || `${method.toUpperCase()} ${path}`;
+
+        // A body whose content type the hub cannot serialize used to produce a
+        // silent zero-argument tool that models would retry forever. Mark such
+        // operations visibly in the description instead (#1078).
+        if (declaredRequestBody && !requestBodySelection) {
+          const declaredTypes = Object.keys(declaredRequestBody.content ?? {}).join(', ');
+          description += ` [Unsupported request body content type(s): ${declaredTypes} — only application/json, application/x-www-form-urlencoded and multipart/form-data can be sent by MCPHub.]`;
+        }
+
         const tool: OpenAPIToolInfo = {
           name: operationName,
-          description:
-            operation.summary || operation.description || `${method.toUpperCase()} ${path}`,
+          description,
           // SwaggerParser.dereference turns recursive $ref schemas into live
           // circular references on the dereferenced spec objects. generateInputSchema
           // references those objects directly, so without sanitization every
           // downstream serializer (tokenCost, getServerConfig, MCP ListTools,
           // embeddings) throws "Converting circular structure to JSON". See #959.
           inputSchema: createSafeJSON(
-            this.generateInputSchema(operation, path, method as string),
+            this.generateInputSchema(operation, path, method as string, requestBodySelection),
           ),
           operationId: operation.operationId || operationName,
           method: method as string,
@@ -428,6 +603,7 @@ export class OpenAPIClient {
     operation: OpenAPIV3.OperationObject,
     _path: string,
     _method: string,
+    requestBodySelection: RequestBodyContentSelection | null,
   ): Record<string, unknown> {
     const schema: Record<string, unknown> = {
       type: 'object',
@@ -472,13 +648,39 @@ export class OpenAPIClient {
       }
     }
 
-    // Handle request body
-    if (operation.requestBody && 'content' in operation.requestBody) {
-      const requestBody = operation.requestBody as OpenAPIV3.RequestBodyObject;
-      const jsonContent = requestBody.content?.['application/json'];
+    // Handle header parameters. callTool() already copies `in: header`
+    // arguments into the outgoing request, so they must be advertised here too,
+    // otherwise an operation whose per-call credential is a header is exposed
+    // as a zero-argument tool the model cannot supply a value for.
+    const headerParams = operation.parameters?.filter(
+      (p: any) => 'in' in p && p.in === 'header',
+    ) as OpenAPIV3.ParameterObject[];
 
-      if (jsonContent?.schema) {
-        properties['body'] = jsonContent.schema;
+    if (headerParams?.length) {
+      for (const param of headerParams) {
+        properties[param.name] = this.generateParameterSchema(
+          param,
+          `Header parameter: ${param.name}`,
+        );
+        if (param.required) {
+          required.push(param.name);
+        }
+      }
+    }
+
+    // Handle request body. The advertised schema must match what callTool can
+    // serialize, so key off the same resolved content type selection (#1078):
+    // JSON and urlencoded bodies are exposed as-is; multipart bodies are
+    // rewritten so binary fields accept base64-encoded strings.
+    if (operation.requestBody && 'content' in operation.requestBody && requestBodySelection) {
+      const requestBody = operation.requestBody as OpenAPIV3.RequestBodyObject;
+      const selectedSchema = requestBodySelection.mediaType.schema;
+
+      if (selectedSchema) {
+        properties['body'] =
+          requestBodySelection.contentType === 'multipart/form-data'
+            ? makeMultipartBodySchemaModelFriendly(selectedSchema)
+            : selectedSchema;
         if (requestBody.required) {
           required.push('body');
         }
@@ -513,6 +715,7 @@ export class OpenAPIClient {
     args: Record<string, unknown>,
     passthroughHeaders?: Record<string, string>,
     hasRetriedAfterUnauthorized = false,
+    sessionId?: string,
   ): Promise<unknown> {
     const tool = this.tools.find((t) => t.name === toolName);
     if (!tool) {
@@ -521,6 +724,7 @@ export class OpenAPIClient {
 
     let attemptedUpstreamRequest = false;
     let authorizationUsedForRequest: string | undefined;
+    let resolvedTarget: URL | null = null;
 
     try {
       await this.ensureOAuth2AccessToken();
@@ -531,9 +735,14 @@ export class OpenAPIClient {
 
       for (const param of pathParams) {
         const value = args[param.name];
-        if (value !== undefined) {
-          url = url.replace(`{${param.name}}`, String(value));
+        if (value === undefined || value === null) {
+          // Path parameters are required by the OpenAPI spec; fail fast rather
+          // than sending a request whose `{placeholder}` can only 404 (#1083).
+          throw new Error(`Required path parameter '${param.name}' is missing`);
         }
+        // Values come from model output, so encode them to keep URL-significant
+        // characters ('/', '?', '#', '%') from changing the endpoint (#1083).
+        url = url.replace(`{${param.name}}`, encodePathParameterValue(value));
       }
 
       // Build query parameters
@@ -554,9 +763,44 @@ export class OpenAPIClient {
         params: queryParams,
       };
 
-      // Add request body if applicable
-      if (args.body && ['post', 'put', 'patch'].includes(tool.method)) {
-        requestConfig.data = args.body;
+      // Add request body if applicable. Key off the operation's own spec rather
+      // than a method allowlist: some APIs declare required bodies on DELETE
+      // (bulk deletes), and RFC 9110 §9.3.5 permits content when the origin
+      // server has indicated support for it — which a requestBody declaration
+      // in its OpenAPI document is. Keeps schema advertisement and sending
+      // symmetric (#1084). The body is serialized according to the content type
+      // resolved from the same spec the tool schema was built from (#1078).
+      let requestBodyContentType: string | undefined;
+      if (args.body !== undefined && tool.requestBody) {
+        const selection = selectRequestBodyContent(tool.requestBody);
+        if (!selection) {
+          const declaredTypes = Object.keys(tool.requestBody.content ?? {}).join(', ');
+          throw new Error(
+            `Tool '${toolName}' declares a request body with unsupported content type(s): ${declaredTypes}. Only application/json, application/x-www-form-urlencoded and multipart/form-data can be sent by MCPHub.`,
+          );
+        }
+
+        switch (selection.contentType) {
+          case 'application/json':
+            requestConfig.data = args.body;
+            break;
+          case 'application/x-www-form-urlencoded':
+            requestConfig.data = encodeFormUrlEncoded(args.body);
+            requestBodyContentType = 'application/x-www-form-urlencoded';
+            break;
+          case 'multipart/form-data': {
+            const boundary = `----MCPHubBoundary${randomUUID().replace(/-/g, '')}`;
+            // The spec is dereferenced before tools are built, so the schema
+            // cannot still be a $ref here.
+            const bodySchema = selection.mediaType.schema as OpenAPIV3.SchemaObject | undefined;
+            const parts = buildMultipartParts(args.body, bodySchema);
+            requestConfig.data = serializeMultipartBody(parts, boundary);
+            // The boundary must travel with the header, so it is set explicitly
+            // per request rather than left to axios.
+            requestBodyContentType = `multipart/form-data; boundary=${boundary}`;
+            break;
+          }
+        }
       }
 
       // Collect all headers to be sent
@@ -580,6 +824,12 @@ export class OpenAPIClient {
         }
       }
 
+      // Form and multipart bodies override the client-wide JSON Content-Type
+      // default for this request only (#1078).
+      if (requestBodyContentType) {
+        allHeaders['Content-Type'] = requestBodyContentType;
+      }
+
       // Set headers if any were collected
       if (Object.keys(allHeaders).length > 0) {
         requestConfig.headers = allHeaders;
@@ -589,7 +839,7 @@ export class OpenAPIClient {
       // internal/loopback/link-local address. The baseURL and tool path are
       // both attacker-influenced (via the OpenAPI spec), so validate the
       // final URL rather than trusting either alone.
-      let resolvedTarget: URL | null = null;
+      resolvedTarget = null;
       try {
         resolvedTarget = new URL(String(requestConfig.url ?? '/'), this.baseUrl || undefined);
       } catch {
@@ -601,12 +851,36 @@ export class OpenAPIClient {
         });
       }
 
+      const cookieSessionEnabled = this.isCookieSessionEnabled(sessionId);
+      // Inject cookies when either the dynamic session store is active for this
+      // call or a static `apiKey.in: 'cookie'` is configured (static cookies
+      // apply to every request regardless of session).
+      if ((cookieSessionEnabled || this.staticCookieHeader) && resolvedTarget) {
+        this.applyRequestCookies(
+          requestConfig,
+          resolvedTarget.href,
+          cookieSessionEnabled ? sessionId : undefined,
+        );
+      }
+
       authorizationUsedForRequest = this.getDefaultAuthorizationHeader();
       attemptedUpstreamRequest = true;
       const response = await this.httpClient.request(requestConfig);
+
+      if (cookieSessionEnabled && resolvedTarget) {
+        this.captureResponseCookies(response, resolvedTarget.href, sessionId);
+      }
+
       return response.data;
     } catch (error) {
       if (axios.isAxiosError(error)) {
+        // Capture Set-Cookie from non-2xx responses too. With maxRedirects: 0,
+        // a 3xx login redirect is surfaced as an error; 4xx logout responses
+        // may expire cookies. Capture before retry/rethrow so the jar stays
+        // current and the 401-retry path can re-inject updated cookies.
+        if (this.isCookieSessionEnabled(sessionId) && resolvedTarget && error.response) {
+          this.captureResponseCookies(error.response, resolvedTarget.href, sessionId);
+        }
         if (
           attemptedUpstreamRequest &&
           error.response?.status === 401 &&
@@ -614,7 +888,7 @@ export class OpenAPIClient {
           authorizationUsedForRequest &&
           authorizationUsedForRequest !== this.getDefaultAuthorizationHeader()
         ) {
-          return this.callTool(toolName, args, passthroughHeaders, true);
+          return this.callTool(toolName, args, passthroughHeaders, true, sessionId);
         }
 
         if (
@@ -623,7 +897,7 @@ export class OpenAPIClient {
           !hasRetriedAfterUnauthorized &&
           (await this.invalidateRefreshableOAuth2Token())
         ) {
-          return this.callTool(toolName, args, passthroughHeaders, true);
+          return this.callTool(toolName, args, passthroughHeaders, true, sessionId);
         }
 
         const status = error.response?.status ?? 'unknown';
@@ -660,7 +934,130 @@ export class OpenAPIClient {
     return this.spec;
   }
 
+  private isCookieSessionEnabled(sessionId?: string): sessionId is string {
+    return (
+      !!this.config.openapi?.cookieSession && typeof sessionId === 'string' && sessionId.length > 0
+    );
+  }
+
+  // Lazily create a per-session cookie jar, seeded with the static apiKey
+  // cookie (if any) so it applies to every request and can be overridden by a
+  // dynamic Set-Cookie of the same name.
+  private getCookieJar(sessionId: string): CookieJar {
+    let jar = this.cookieJars.get(sessionId);
+    if (jar) {
+      return jar;
+    }
+
+    // Backstop: evict the oldest jar before exceeding the cap. Session-end
+    // cleanup is the primary eviction path; this guards against leaks when a
+    // session is abandoned without an explicit close.
+    if (this.cookieJars.size >= OpenAPIClient.MAX_COOKIE_JARS) {
+      const oldest = this.cookieJars.keys().next().value;
+      if (oldest !== undefined) {
+        this.cookieJars.delete(oldest);
+      }
+    }
+
+    jar = new CookieJar();
+    if (this.staticCookieHeader && this.baseUrl) {
+      try {
+        jar.setCookieSync(`${this.staticCookieHeader}; Path=/`, this.baseUrl);
+      } catch {
+        // ignore malformed static cookie / unsuitable baseUrl
+      }
+    }
+    this.cookieJars.set(sessionId, jar);
+    return jar;
+  }
+
+  // Apply stored cookies to an outgoing request. When a session jar exists,
+  // use it (it already includes any seeded static cookie and captured dynamic
+  // cookies). Otherwise fall back to the static `apiKey.in: 'cookie'` value so
+  // static cookie auth works without opting into session handling.
+  private applyRequestCookies(
+    requestConfig: AxiosRequestConfig,
+    requestUrl: string,
+    sessionId?: string,
+  ): void {
+    let cookieString = '';
+    if (sessionId) {
+      const jar = this.cookieJars.get(sessionId);
+      if (jar) {
+        try {
+          cookieString = jar.getCookieStringSync(requestUrl);
+        } catch {
+          return;
+        }
+      } else if (this.staticCookieHeader) {
+        cookieString = this.staticCookieHeader;
+      }
+    } else if (this.staticCookieHeader) {
+      cookieString = this.staticCookieHeader;
+    }
+
+    if (cookieString) {
+      const existingHeaders = requestConfig.headers as Record<string, string> | undefined;
+      const merged = OpenAPIClient.mergeCookieHeader(existingHeaders?.Cookie, cookieString);
+      requestConfig.headers = {
+        ...existingHeaders,
+        Cookie: merged,
+      };
+    }
+  }
+
+  // Merge two Cookie header strings, with `additional` (jar/static) values
+  // winning for duplicate names so caller-configured cookies are preserved.
+  private static mergeCookieHeader(existing: string | undefined, additional: string): string {
+    const entries = new Map<string, string>();
+    const parse = (header: string) => {
+      for (const part of header.split(';')) {
+        const trimmed = part.trim();
+        if (!trimmed) {
+          continue;
+        }
+        const eq = trimmed.indexOf('=');
+        if (eq <= 0) {
+          continue;
+        }
+        entries.set(trimmed.slice(0, eq).trim(), trimmed.slice(eq + 1));
+      }
+    };
+    if (existing) {
+      parse(existing);
+    }
+    parse(additional);
+    return [...entries].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  // Capture Set-Cookie headers from an upstream response into the session jar.
+  private captureResponseCookies(
+    response: AxiosResponse,
+    requestUrl: string,
+    sessionId: string,
+  ): void {
+    const setCookie = response.headers?.['set-cookie'];
+    if (!setCookie) {
+      return;
+    }
+    const jar = this.getCookieJar(sessionId);
+    const headers = Array.isArray(setCookie) ? setCookie : [setCookie];
+    for (const header of headers) {
+      try {
+        jar.setCookieSync(header, requestUrl);
+      } catch {
+        // skip unparseable Set-Cookie rather than failing the tool call
+      }
+    }
+  }
+
+  // Drop the cookie jar for a session. Called from session-end cleanup.
+  clearSessionCookies(sessionId: string): void {
+    this.cookieJars.delete(sessionId);
+  }
+
   disconnect(): void {
     // No persistent connection to close for OpenAPI
+    this.cookieJars.clear();
   }
 }

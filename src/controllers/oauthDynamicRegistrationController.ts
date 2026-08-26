@@ -8,7 +8,9 @@ import {
 } from '../models/OAuth.js';
 import { IOAuthClient } from '../types/index.js';
 import { getSystemConfigDao } from '../dao/DaoFactory.js';
+import { auth } from '../middlewares/auth.js';
 import { resolveInstallBaseUrl } from '../utils/installBaseUrl.js';
+import { logger } from '../utils/logger.js';
 
 // Store registration access tokens (in production, use database)
 const registrationTokens = new Map<string, { clientId: string; createdAt: Date }>();
@@ -61,6 +63,22 @@ export const registerClient = async (req: Request, res: Response): Promise<void>
         error_description: 'Dynamic client registration is not enabled',
       });
       return;
+    }
+
+    // RFC 7591 §3.1 + GHSA-wwgw/3m7m follow-up: when the operator marks
+    // dynamic registration as requiring authentication, only requests carrying
+    // a recognized credential (dashboard JWT, bearer key, OAuth token or
+    // Better Auth session) may register clients. auth() always settles after
+    // either attaching req.user or sending an error response itself.
+    if (oauthConfig.dynamicRegistration.requiresAuthentication) {
+      try {
+        await auth(req, res, () => {});
+      } catch {
+        // Treated as unauthenticated below.
+      }
+      if (!(req as any).user || res.headersSent) {
+        return;
+      }
     }
 
     // Validate required fields
@@ -217,7 +235,7 @@ export const registerClient = async (req: Request, res: Response): Promise<void>
 
     res.status(201).json(response);
   } catch (error) {
-    console.error('Dynamic client registration error:', error);
+    logger.error('Dynamic client registration error:', error);
 
     if (error instanceof Error && error.message.includes('already exists')) {
       res.status(400).json({
@@ -298,7 +316,7 @@ export const getClientConfiguration = async (req: Request, res: Response): Promi
 
     res.json(response);
   } catch (error) {
-    console.error('Get client configuration error:', error);
+    logger.error('Get client configuration error:', error);
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to retrieve client configuration',
@@ -482,7 +500,7 @@ export const updateClientConfiguration = async (req: Request, res: Response): Pr
 
     res.json(response);
   } catch (error) {
-    console.error('Update client configuration error:', error);
+    logger.error('Update client configuration error:', error);
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to update client configuration',
@@ -534,7 +552,7 @@ export const deleteClientRegistration = async (req: Request, res: Response): Pro
 
     res.status(204).send();
   } catch (error) {
-    console.error('Delete client registration error:', error);
+    logger.error('Delete client registration error:', error);
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to delete client registration',

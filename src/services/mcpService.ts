@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import treeKill from 'tree-kill';
+import { isProcessTreeKillAvailable } from '../utils/processTree.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -27,6 +28,7 @@ import { normalizeHeaders, type Transport } from '@modelcontextprotocol/sdk/shar
 import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { createFetchWithProxy, getProxyConfigFromEnv } from './proxy.js';
 import { assertSafeUrl, createRedirectValidatingFetch } from '../utils/ssrf.js';
+import { createAbortIsolatingFetch } from '../utils/abortIsolatingFetch.js';
 import { ResilientJsonSchemaValidator } from '../utils/jsonSchemaValidator.js';
 import { getUserDao } from '../dao/index.js';
 import {
@@ -89,6 +91,7 @@ import { supportsCacheRefresh, injectRefreshFlag, clearRunnerCache } from '../ut
 const servers: { [sessionId: string]: Server } = {};
 
 import { setupClientKeepAlive } from './keepAliveService.js';
+import { logger } from '../utils/logger.js';
 
 type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -142,13 +145,13 @@ const generateProxychainsConfig = (
     if (fs.existsSync(proxyConfig.configPath)) {
       return proxyConfig.configPath;
     }
-    console.warn(`[${serverName}] Custom proxychains config not found: ${proxyConfig.configPath}`);
+    logger.warn(`[${serverName}] Custom proxychains config not found: ${proxyConfig.configPath}`);
     return null;
   }
 
   // Validate required fields
   if (!proxyConfig.host || !proxyConfig.port) {
-    console.warn(`[${serverName}] Proxy host and port are required for proxychains4`);
+    logger.warn(`[${serverName}] Proxy host and port are required for proxychains4`);
     return null;
   }
 
@@ -185,7 +188,7 @@ ${proxyLine}
   // Write config file
   const configPath = path.join(tempDir, `${serverName.replace(/[^a-zA-Z0-9-_]/g, '_')}.conf`);
   fs.writeFileSync(configPath, configContent, 'utf-8');
-  console.log(`[${serverName}] Generated proxychains4 config: ${configPath}`);
+  logger.log(`[${serverName}] Generated proxychains4 config: ${configPath}`);
 
   return configPath;
 };
@@ -197,9 +200,20 @@ ${proxyLine}
 const isSafeCommand = (command: string): boolean => {
   // Block shell builtins that could be used for command injection
   const blockedCommands = new Set([
-    'sh', 'bash', 'zsh', 'fish', 'csh', 'ksh', 'tcsh',
-    'cmd', 'powershell', 'pwsh',
-    'eval', 'exec', 'source', '.',
+    'sh',
+    'bash',
+    'zsh',
+    'fish',
+    'csh',
+    'ksh',
+    'tcsh',
+    'cmd',
+    'powershell',
+    'pwsh',
+    'eval',
+    'exec',
+    'source',
+    '.',
   ]);
 
   const basename = command.split('/').pop()?.split('\\').pop()?.toLowerCase() || '';
@@ -220,7 +234,7 @@ const isSafeCommand = (command: string): boolean => {
  * Removes shell metacharacters and dangerous patterns.
  */
 const sanitizeArgs = (args: string[]): string[] => {
-  return args.map(arg => {
+  return args.map((arg) => {
     // Remove shell metacharacters that could be used for injection
     // Allow common flags (-f, --flag, -vvv) and paths
     if (/^[a-zA-Z0-9._/\\:@=+,-]+$/.test(arg)) {
@@ -228,7 +242,7 @@ const sanitizeArgs = (args: string[]): string[] => {
     }
     // For arguments with special characters, log a warning
     // Also block redirection operators (>, <, >>) and newlines
-    console.warn(`[proxychains] Potentially unsafe argument blocked: ${arg}`);
+    logger.warn(`[proxychains] Potentially unsafe argument blocked: ${arg}`);
     return arg.replace(/[;&|`$(){}[\]!><\n\r]/g, '');
   });
 };
@@ -250,7 +264,7 @@ const wrapWithProxychains = (
 
   // Check platform - Windows is not supported
   if (process.platform === 'win32') {
-    console.warn(
+    logger.warn(
       `[${serverName}] proxychains4 proxy is not supported on Windows, ignoring proxy configuration`,
     );
     return { command, args };
@@ -258,9 +272,7 @@ const wrapWithProxychains = (
 
   // SECURITY: Validate command is safe
   if (!isSafeCommand(command)) {
-    console.error(
-      `[${serverName}] Blocked unsafe command for proxychains4 wrapping: ${command}`,
-    );
+    logger.error(`[${serverName}] Blocked unsafe command for proxychains4 wrapping: ${command}`);
     throw new Error(
       `[${serverName}] Unsafe command blocked: ${command}. Shell builtins and metacharacters are not allowed.`,
     );
@@ -269,7 +281,7 @@ const wrapWithProxychains = (
   // Find proxychains4 binary
   const proxychains4Path = findProxychains4();
   if (!proxychains4Path) {
-    console.warn(
+    logger.warn(
       `[${serverName}] proxychains4 not found on system, install it with: apt install proxychains4 (Debian/Ubuntu) or brew install proxychains-ng (macOS)`,
     );
     return { command, args };
@@ -278,7 +290,7 @@ const wrapWithProxychains = (
   // Generate or get config file
   const configPath = generateProxychainsConfig(serverName, proxyConfig);
   if (!configPath) {
-    console.warn(`[${serverName}] Failed to setup proxychains4 configuration, skipping proxy`);
+    logger.warn(`[${serverName}] Failed to setup proxychains4 configuration, skipping proxy`);
     return { command, args };
   }
 
@@ -286,7 +298,7 @@ const wrapWithProxychains = (
   const sanitizedArgs = sanitizeArgs(args);
 
   // Wrap command with proxychains4
-  console.log(
+  logger.log(
     `[${serverName}] Using proxychains4 proxy: ${proxyConfig.type || 'socks5'}://${proxyConfig.host}:${proxyConfig.port}`,
   );
 
@@ -304,7 +316,7 @@ export const initUpstreamServers = async (): Promise<void> => {
   await registerAllTools(true);
 
   // Initialize smart routing service with references to mcpService functions
-  initSmartRoutingService(() => serverInfos, filterToolsByConfig, filterToolsByGroup);
+  initSmartRoutingService(getVisibleServerInfos, filterToolsByConfig, filterToolsByGroup);
 };
 
 type McpServerDescriptor = {
@@ -355,7 +367,7 @@ export const getMcpServer = async (sessionId?: string, group?: string): Promise<
   if (!servers[sessionId]) {
     servers[sessionId] = createMcpServer(descriptor.name, descriptor.version, descriptor);
   } else {
-    console.log(`MCP server already exists for sessionId: ${sessionId}`);
+    logger.log(`MCP server already exists for sessionId: ${sessionId}`);
   }
   return servers[sessionId];
 };
@@ -374,7 +386,7 @@ const closeIsolatedClient = (serverName: string, client: Client, transport: any)
   try {
     client.close();
   } catch (e) {
-    console.warn(`[${serverName}] Error closing isolated client:`, e);
+    logger.warn(`[${serverName}] Error closing isolated client:`, e);
   }
 
   const candidateTransport = transport as { pid?: unknown };
@@ -383,7 +395,7 @@ const closeIsolatedClient = (serverName: string, client: Client, transport: any)
   try {
     transport.close();
   } catch (e) {
-    console.warn(`[${serverName}] Error closing isolated transport:`, e);
+    logger.warn(`[${serverName}] Error closing isolated transport:`, e);
   }
 
   // For stdio transports, kill the whole process tree to avoid orphans
@@ -411,7 +423,13 @@ const cleanupIsolatedSession = (sessionId: string): void => {
         isolatedClientCreationLocks.delete(key);
       }
     }
-    console.log(`Cleaned up isolated clients for session: ${sessionId}`);
+    logger.log(`Cleaned up isolated clients for session: ${sessionId}`);
+  }
+
+  // Drop per-session OpenAPI cookie jars so authenticated state does not
+  // outlive the downstream session.
+  for (const serverInfo of serverInfos) {
+    serverInfo.openApiClient?.clearSessionCookies?.(sessionId);
   }
 };
 
@@ -490,7 +508,7 @@ const getOrCreateIsolatedClient = async (
     // Guard: the session was cleaned up during the async connect if its map was
     // deleted (identity no longer matches) — close the just-created connection.
     if (sessionIsolatedClients.get(sessionId) !== reservedClients) {
-      console.warn(
+      logger.warn(
         `Session ${sessionId} was deleted during isolated client creation for ${serverInfo.name}, closing new client`,
       );
       closeIsolatedClient(serverInfo.name, client, transport);
@@ -498,7 +516,7 @@ const getOrCreateIsolatedClient = async (
     }
 
     setSessionIsolatedClient(sessionId, serverInfo.name, client, transport);
-    console.log(`Created isolated client for session ${sessionId} -> ${serverInfo.name}`);
+    logger.log(`Created isolated client for session ${sessionId} -> ${serverInfo.name}`);
 
     return { client, transport };
   })();
@@ -531,10 +549,10 @@ const broadcastListChanged = (
   Object.values(servers).forEach((server) => {
     sendNotification(server)
       .then(() => {
-        console.log(`${listType} list changed notification sent successfully`);
+        logger.log(`${listType} list changed notification sent successfully`);
       })
       .catch((error) => {
-        console.warn(`Failed to send ${listType} list changed notification:`, error.message);
+        logger.warn(`Failed to send ${listType} list changed notification:`, error.message);
       });
   });
 };
@@ -554,6 +572,7 @@ export const broadcastPromptListChanged = (): void => {
 export const updateServerInfoVisibility = (
   serverName: string,
   visibility: ServerConfig['visibility'],
+  sharedWithUsers?: string[],
 ): void => {
   const serverInfo = getServerByName(serverName);
   if (!serverInfo) {
@@ -561,11 +580,13 @@ export const updateServerInfoVisibility = (
   }
 
   serverInfo.visibility = visibility;
+  serverInfo.sharedWithUsers = sharedWithUsers;
 
   if (serverInfo.config) {
     serverInfo.config = {
       ...serverInfo.config,
       visibility,
+      sharedWithUsers,
     };
   }
 };
@@ -573,12 +594,12 @@ export const updateServerInfoVisibility = (
 export const syncToolEmbedding = async (serverName: string, toolName: string) => {
   const serverInfo = getServerByName(serverName);
   if (!serverInfo) {
-    console.warn(`Server not found: ${serverName}`);
+    logger.warn(`Server not found: ${serverName}`);
     return;
   }
   const tool = serverInfo.tools.find((t) => t.name === toolName);
   if (!tool) {
-    console.warn(`Tool not found: ${toolName} on server: ${serverName}`);
+    logger.warn(`Tool not found: ${toolName} on server: ${serverName}`);
     return;
   }
   if (isAppOnlyTool(tool)) {
@@ -586,10 +607,10 @@ export const syncToolEmbedding = async (serverName: string, toolName: string) =>
   }
   // Save tool as vector embedding for search
   syncToolsAsVectorEmbeddings(serverName, [tool]).catch((error) => {
-    console.warn(
+    logger.warn(
       `[EMBED_SYNC_ERROR] Failed to sync embedding for tool "${toolName}" on server "${serverName}"`,
     );
-    console.error('Error syncing single tool embedding', { serverName, toolName, error });
+    logger.error('Error syncing single tool embedding', { serverName, toolName, error });
   });
 };
 
@@ -702,6 +723,14 @@ const normalizeResourceForCache = (resource: McpResource): Resource => {
 // Store all server information
 let serverInfos: ServerInfo[] = [];
 
+const getVisibleServerInfos = (): ServerInfo[] => {
+  return getDataService().filterData(serverInfos);
+};
+
+const getVisibleServerByName = (name: string): ServerInfo | undefined => {
+  return getVisibleServerInfos().find((serverInfo) => serverInfo.name === name);
+};
+
 // Per-session upstream clients for isolated servers (perSessionClient: true).
 // Map<sessionId, Map<serverName, { client, transport }>>
 const sessionIsolatedClients = new Map<string, Map<string, { client: Client; transport: any }>>();
@@ -744,7 +773,7 @@ export const updateServerToolsCache = (
   syncToolsAsVectorEmbeddings(serverInfo.name, serverInfo.tools, {
     reportProgress: options?.reportEmbeddingProgress === true,
   }).catch(() => {
-    console.warn('[EMBED_SYNC_ERROR] Failed to sync tool embeddings');
+    logger.warn('[EMBED_SYNC_ERROR] Failed to sync tool embeddings');
   });
 };
 
@@ -757,7 +786,7 @@ const updateServerResourcesCache = (serverInfo: ServerInfo, resources: McpResour
 };
 
 const logListChangedRefreshError = (listType: 'tool' | 'prompt' | 'resource'): void => {
-  console.warn(`Failed to refresh ${listType} list after upstream notification`);
+  logger.warn(`Failed to refresh ${listType} list after upstream notification`);
 };
 
 const createUpstreamMcpClient = (
@@ -895,7 +924,7 @@ export const cleanupAllServers = (): void => {
         serverInfo.transport.close();
       }
     } catch (error) {
-      console.warn('Error closing server', { serverName: serverInfo.name, error });
+      logger.warn('Error closing server', { serverName: serverInfo.name, error });
     }
   }
   serverInfos = [];
@@ -1216,9 +1245,7 @@ export const createRequestContextAwareFetch = (
  * requestInit headers on top, so a leftover static Authorization value would
  * override the valid OAuth access token and produce 401 authentication loops.
  */
-const stripAuthorizationHeader = (
-  headers: Record<string, string>,
-): Record<string, string> => {
+const stripAuthorizationHeader = (headers: Record<string, string>): Record<string, string> => {
   return Object.fromEntries(
     Object.entries(headers).filter(([key]) => key.toLowerCase() !== 'authorization'),
   );
@@ -1236,9 +1263,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
   // Admin-owned servers may legitimately target internal services, so they
   // skip the internal-IP blocklist. allowInternal also governs per-hop
   // redirect validation in createRedirectValidatingFetch below.
-  const ownerUser = conf.owner
-    ? await getUserDao().findByUsername(conf.owner)
-    : null;
+  const ownerUser = conf.owner ? await getUserDao().findByUsername(conf.owner) : null;
   const allowInternal = !!ownerUser?.isAdmin;
 
   if (conf.url) {
@@ -1248,7 +1273,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
   if (conf.type === 'streamable-http') {
     const options: StreamableHTTPClientTransportOptions = {};
     let headers = conf.headers ? replaceEnvVars(conf.headers, env) : {};
-    const baseFetch = createFetchWithProxy(getProxyConfigFromEnv(env));
+    const baseFetch = createAbortIsolatingFetch(createFetchWithProxy(getProxyConfigFromEnv(env)));
     const requestAwareFetch = createRedirectValidatingFetch(
       createRequestContextAwareFetch(baseFetch, conf.passthroughHeaders),
       allowInternal,
@@ -1265,7 +1290,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       // Authorization value would override the valid access token and cause
       // 401 re-authorization loops.
       headers = stripAuthorizationHeader(headers);
-      console.log(`OAuth provider configured for server: ${name}`);
+      logger.log(`OAuth provider configured for server: ${name}`);
     }
 
     if (Object.keys(headers).length > 0) {
@@ -1281,7 +1306,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     // SSE transport
     const options: any = {};
     let headers = conf.headers ? replaceEnvVars(conf.headers, env) : {};
-    const baseFetch = createFetchWithProxy(getProxyConfigFromEnv(env));
+    const baseFetch = createAbortIsolatingFetch(createFetchWithProxy(getProxyConfigFromEnv(env)));
     const requestAwareFetch = createRedirectValidatingFetch(
       createRequestContextAwareFetch(baseFetch, conf.passthroughHeaders),
       allowInternal,
@@ -1293,7 +1318,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       options.authProvider = authProvider;
       // Drop static Authorization header when OAuth manages auth (see above).
       headers = stripAuthorizationHeader(headers);
-      console.log(`OAuth provider configured for server: ${name}`);
+      logger.log(`OAuth provider configured for server: ${name}`);
     }
 
     if (Object.keys(headers).length > 0) {
@@ -1346,7 +1371,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     if (pendingReinstalls.has(name)) {
       resolvedArgs = injectRefreshFlag(conf.command, resolvedArgs);
       pendingReinstalls.delete(name);
-      console.log(`[${name}] Injected cache refresh flags for reinstall`);
+      logger.log(`[${name}] Injected cache refresh flags for reinstall`);
     }
 
     const { command: finalCommand, args: finalArgs } = wrapWithProxychains(
@@ -1366,10 +1391,13 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     });
     if (transport.stderr) {
       observeStdioStderr(transport, transport.stderr, (message) => {
-        console.log('Upstream server stderr', {
-          serverName: name,
-          message,
-        });
+        logger.log(
+          'Upstream server stderr',
+          JSON.stringify({
+            serverName: name,
+            message,
+          }),
+        );
       });
     }
   } else {
@@ -1378,7 +1406,6 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
 
   return transport;
 };
-
 
 type IsolatedClientContext = {
   sessionId: string;
@@ -1415,7 +1442,7 @@ const callToolWithReconnect = async (
       const isStreamableHttp = transport instanceof StreamableHTTPClientTransport;
       const isSSE = transport instanceof SSEClientTransport;
       if (attempt < maxRetries && transport && ((isStreamableHttp && isHttp40xError) || isSSE)) {
-        console.warn(
+        logger.warn(
           `${isHttp40xError ? 'HTTP 40x error' : 'error'} detected for ${isStreamableHttp ? 'StreamableHTTP' : 'SSE'} server ${serverInfo.name}${isolated ? ` (isolated session ${isolated.sessionId})` : ''}, attempting reconnection (attempt ${attempt + 1}/${maxRetries + 1})`,
         );
 
@@ -1435,9 +1462,17 @@ const callToolWithReconnect = async (
             // Isolated path: close only this session's stale connection and
             // replace its entry in the per-session map. Never touch the shared
             // serverInfo client/transport.
-            try { client.close(); } catch { /* empty */ }
-            try { transport.close(); } catch { /* empty */ }
-            
+            try {
+              client.close();
+            } catch {
+              /* empty */
+            }
+            try {
+              transport.close();
+            } catch {
+              /* empty */
+            }
+
             setSessionIsolatedClient(isolated.sessionId, serverInfo.name, newClient, newTransport);
           } else {
             // Shared path: tear down and replace the shared connection.
@@ -1445,8 +1480,16 @@ const callToolWithReconnect = async (
               clearInterval(serverInfo.keepAliveIntervalId);
               serverInfo.keepAliveIntervalId = undefined;
             }
-            try { serverInfo.client?.close(); } catch { /* empty */ }
-            try { transport.close(); } catch { /* empty */ }
+            try {
+              serverInfo.client?.close();
+            } catch {
+              /* empty */
+            }
+            try {
+              transport.close();
+            } catch {
+              /* empty */
+            }
 
             serverInfo.client = newClient;
             serverInfo.transport = newTransport;
@@ -1462,19 +1505,19 @@ const callToolWithReconnect = async (
             const tools = await newClient.listTools({}, serverInfo.options || {});
             updateServerToolsCache(serverInfo, tools.tools);
           } catch (listToolsError) {
-            console.warn('Failed to reload tools after reconnection', {
+            logger.warn('Failed to reload tools after reconnection', {
               serverName: serverInfo.name,
               error: summarizeErrorForLogging(listToolsError),
             });
             // Continue anyway, as the connection might still work for the current tool
           }
 
-          console.log(`Successfully reconnected to server: ${serverInfo.name}`);
+          logger.log(`Successfully reconnected to server: ${serverInfo.name}`);
 
           // Continue to next attempt
           continue;
         } catch (reconnectError) {
-          console.error('Failed to reconnect to server', {
+          logger.error('Failed to reconnect to server', {
             serverName: serverInfo.name,
             error: summarizeErrorForLogging(reconnectError),
           });
@@ -1511,7 +1554,7 @@ const setupServerKeepAlive = (serverInfo: ServerInfo, serverConfig: ServerConfig
       }
     },
   }).catch((error) =>
-    console.warn('Keepalive setup failed', {
+    logger.warn('Keepalive setup failed', {
       serverName: serverInfo.name,
       error: summarizeErrorForLogging(error),
     }),
@@ -1537,11 +1580,12 @@ export const initializeClientsFromSettings = async (
 
       // Skip disabled servers
       if (expandedConf.enabled === false) {
-        console.log(`Skipping disabled server: ${name}`);
+        logger.log(`Skipping disabled server: ${name}`);
         nextServerInfos.push({
           name,
           owner: expandedConf.owner,
           visibility: expandedConf.visibility,
+          sharedWithUsers: expandedConf.sharedWithUsers,
           status: 'disconnected',
           error: null,
           tools: [],
@@ -1573,10 +1617,11 @@ export const initializeClientsFromSettings = async (
           }),
           owner: expandedConf.owner,
           visibility: expandedConf.visibility,
+          sharedWithUsers: expandedConf.sharedWithUsers,
           enabled: true,
           config: expandedConf,
         });
-        console.log(`Skipping startup connect for on-demand server: ${name}`);
+        logger.log(`Skipping startup connect for on-demand server: ${name}`);
         continue;
       }
 
@@ -1594,10 +1639,7 @@ export const initializeClientsFromSettings = async (
       const isDifferentServer = Boolean(serverName) && serverName !== name;
       const hasInflightOAuthAuthorization =
         existingServer?.status === 'oauth_required' &&
-        Boolean(
-          expandedConf.oauth?.pendingAuthorization?.state ||
-            existingServer.oauth?.state,
-        );
+        Boolean(expandedConf.oauth?.pendingAuthorization?.state || existingServer.oauth?.state);
       if (
         existingServer &&
         (isDifferentServer ||
@@ -1605,9 +1647,12 @@ export const initializeClientsFromSettings = async (
       ) {
         nextServerInfos.push({
           ...existingServer,
+          owner: expandedConf.owner,
+          visibility: expandedConf.visibility,
+          sharedWithUsers: expandedConf.sharedWithUsers,
           enabled: expandedConf.enabled === undefined ? true : expandedConf.enabled,
         });
-        console.log(
+        logger.log(
           hasInflightOAuthAuthorization
             ? `Server '${name}' has an in-flight OAuth authorization; preserving existing state.`
             : `Server '${name}' is already connected.`,
@@ -1620,13 +1665,14 @@ export const initializeClientsFromSettings = async (
       if (expandedConf.type === 'openapi') {
         // Handle OpenAPI type servers
         if (!expandedConf.openapi?.url && !expandedConf.openapi?.schema) {
-          console.warn(
+          logger.warn(
             `Skipping OpenAPI server '${name}': missing OpenAPI specification URL or schema`,
           );
           nextServerInfos.push({
             name,
             owner: expandedConf.owner,
             visibility: expandedConf.visibility,
+            sharedWithUsers: expandedConf.sharedWithUsers,
             status: 'disconnected',
             error: 'Missing OpenAPI specification URL or schema',
             tools: [],
@@ -1642,6 +1688,7 @@ export const initializeClientsFromSettings = async (
           name,
           owner: expandedConf.owner,
           visibility: expandedConf.visibility,
+          sharedWithUsers: expandedConf.sharedWithUsers,
           status: 'connecting',
           error: null,
           tools: [],
@@ -1678,7 +1725,7 @@ export const initializeClientsFromSettings = async (
             },
           });
 
-          console.log(`Initializing OpenAPI server: ${name}...`);
+          logger.log(`Initializing OpenAPI server: ${name}...`);
 
           // Perform async initialization
           await openApiClient.initialize();
@@ -1696,7 +1743,7 @@ export const initializeClientsFromSettings = async (
           serverInfo.tools = mcpTools;
           serverInfo.openApiClient = openApiClient;
 
-          console.log(
+          logger.log(
             `Successfully initialized OpenAPI server: ${name} with ${mcpTools.length} tools`,
           );
 
@@ -1708,17 +1755,17 @@ export const initializeClientsFromSettings = async (
           syncToolsAsVectorEmbeddings(name, mcpTools, {
             reportProgress: options?.reportEmbeddingProgress === true && serverName === name,
           }).catch((error) => {
-            console.warn(
+            logger.warn(
               `[EMBED_SYNC_ERROR] Failed to sync OpenAPI embeddings for server "${name}"`,
             );
-            console.error('Error syncing OpenAPI tool embeddings', {
+            logger.error('Error syncing OpenAPI tool embeddings', {
               serverName: name,
               error: summarizeErrorForLogging(error),
             });
           });
           continue;
         } catch (error) {
-          console.error('Failed to initialize OpenAPI server', {
+          logger.error('Failed to initialize OpenAPI server', {
             serverName: name,
             error: summarizeErrorForLogging(error),
           });
@@ -1755,6 +1802,7 @@ export const initializeClientsFromSettings = async (
         name,
         owner: expandedConf.owner,
         visibility: expandedConf.visibility,
+        sharedWithUsers: expandedConf.sharedWithUsers,
         status: 'connecting',
         error: null,
         tools: [],
@@ -1781,19 +1829,19 @@ export const initializeClientsFromSettings = async (
 
       connectClientWithDiagnostics(client, transport, initRequestOptions || requestOptions)
         .then(() => {
-          console.log(`Successfully connected client for server: ${name}`);
+          logger.log(`Successfully connected client for server: ${name}`);
           const serverVersion = client.getServerVersion?.();
           serverInfo.version = serverVersion?.version;
           serverInfo.instructions = client.getInstructions?.();
           const capabilities: ServerCapabilities | undefined = client.getServerCapabilities();
-          console.log('Server capabilities', JSON.stringify(capabilities));
+          logger.log('Server capabilities', JSON.stringify(capabilities));
 
           let dataError: Error | null = null;
           if (capabilities?.tools) {
             client
               .listTools({}, initRequestOptions || requestOptions)
               .then((tools) => {
-                console.log(`Successfully listed ${tools.tools.length} tools for server: ${name}`);
+                logger.log(`Successfully listed ${tools.tools.length} tools for server: ${name}`);
                 updateServerToolsCache(serverInfo, tools.tools, {
                   reportEmbeddingProgress:
                     options?.reportEmbeddingProgress === true && serverName === name,
@@ -1805,7 +1853,7 @@ export const initializeClientsFromSettings = async (
                 broadcastToolListChanged();
               })
               .catch((error) => {
-                console.error('Failed to list tools for server', {
+                logger.error('Failed to list tools for server', {
                   serverName: name,
                   error: summarizeErrorForLogging(error),
                 });
@@ -1817,14 +1865,14 @@ export const initializeClientsFromSettings = async (
             client
               .listPrompts({}, initRequestOptions || requestOptions)
               .then((prompts) => {
-                console.log(
+                logger.log(
                   `Successfully listed ${prompts.prompts.length} prompts for server: ${name}`,
                 );
                 updateServerPromptsCache(serverInfo, prompts.prompts);
                 broadcastPromptListChanged();
               })
               .catch((error) => {
-                console.error('Failed to list prompts for server', {
+                logger.error('Failed to list prompts for server', {
                   serverName: name,
                   error: summarizeErrorForLogging(error),
                 });
@@ -1836,14 +1884,14 @@ export const initializeClientsFromSettings = async (
             client
               .listResources({}, initRequestOptions || requestOptions)
               .then((resources) => {
-                console.log(
+                logger.log(
                   `Successfully listed ${resources.resources.length} resources for server: ${name}`,
                 );
                 updateServerResourcesCache(serverInfo, resources.resources);
                 broadcastResourceListChanged();
               })
               .catch((error) => {
-                console.error('Failed to list resources for server', {
+                logger.error('Failed to list resources for server', {
                   serverName: name,
                   error: summarizeErrorForLogging(error),
                 });
@@ -1871,7 +1919,7 @@ export const initializeClientsFromSettings = async (
           if (isOAuthError) {
             // OAuth provider should have already set the status to 'oauth_required'
             // and stored the authorization URL in serverInfo.oauth
-            console.log(
+            logger.log(
               `OAuth authorization required for server ${name}. Status should be set to 'oauth_required'.`,
             );
             // Make sure status is set correctly
@@ -1880,7 +1928,7 @@ export const initializeClientsFromSettings = async (
             }
             serverInfo.error = null;
           } else {
-            console.error('Failed to connect client for server', {
+            logger.error('Failed to connect client for server', {
               serverName: name,
               error: summarizeErrorForLogging(error),
             });
@@ -1890,7 +1938,7 @@ export const initializeClientsFromSettings = async (
             setupServerKeepAlive(serverInfo, expandedConf);
           }
         });
-      console.log(`Initialized client for server: ${name}`);
+      logger.log(`Initialized client for server: ${name}`);
     }
   } catch (error) {
     // Restore previous state if initialization fails to avoid exposing an empty server list
@@ -1966,6 +2014,7 @@ export const getServersInfo = async (
         name: server.name,
         owner: server.owner,
         visibility: server.visibility,
+        sharedWithUsers: server.sharedWithUsers,
         // Newly created servers that are enabled should appear as "connecting"
         // until the MCP client initialization completes. Disabled servers remain
         // in the "disconnected" state.
@@ -2097,7 +2146,7 @@ export const getServerByOAuthState = (state: string): ServerInfo | undefined => 
  * This will close the existing connection and reinitialize the server
  */
 export const reconnectServer = async (serverName: string): Promise<void> => {
-  console.log(`Reconnecting server: ${serverName}`);
+  logger.log(`Reconnecting server: ${serverName}`);
 
   const serverInfo = getServerByName(serverName);
   if (!serverInfo) {
@@ -2106,7 +2155,7 @@ export const reconnectServer = async (serverName: string): Promise<void> => {
 
   const serverConfig = await getServerDao().findById(serverName);
   if (serverConfig?.enabled === false) {
-    console.log(`Skipping reconnect for disabled server: ${serverName}`);
+    logger.log(`Skipping reconnect for disabled server: ${serverName}`);
     return;
   }
 
@@ -2115,7 +2164,7 @@ export const reconnectServer = async (serverName: string): Promise<void> => {
     try {
       serverInfo.client.close();
     } catch (error) {
-      console.warn('Error closing client for server', { serverName, error });
+      logger.warn('Error closing client for server', { serverName, error });
     }
   }
 
@@ -2123,7 +2172,7 @@ export const reconnectServer = async (serverName: string): Promise<void> => {
     try {
       serverInfo.transport.close();
     } catch (error) {
-      console.warn('Error closing transport for server', { serverName, error });
+      logger.warn('Error closing transport for server', { serverName, error });
     }
   }
 
@@ -2135,14 +2184,14 @@ export const reconnectServer = async (serverName: string): Promise<void> => {
   // Reinitialize the server
   await initializeClientsFromSettings(false, serverName);
 
-  console.log(`Successfully reconnected server: ${serverName}`);
+  logger.log(`Successfully reconnected server: ${serverName}`);
 };
 
 // Reinstall server: clear package cache and reconnect.
 // For npx: deletes ~/.npm/_npx before reconnect (--ignore-existing removed in npm 7+).
 // For uvx: schedules --refresh flag injection on next spawn via pendingReinstalls Set.
 export const reinstallServer = async (serverName: string): Promise<void> => {
-  console.log(`Reinstalling server: ${serverName}`);
+  logger.log(`Reinstalling server: ${serverName}`);
 
   const serverInfo = getServerByName(serverName);
   if (!serverInfo) {
@@ -2176,7 +2225,7 @@ export const reinstallServer = async (serverName: string): Promise<void> => {
     // Close and reconnect (will pick up pendingReinstalls flag for uvx)
     await reconnectServer(serverName);
 
-    console.log(`Successfully initiated reinstall for server: ${serverName}`);
+    logger.log(`Successfully initiated reinstall for server: ${serverName}`);
   } catch (error) {
     // Clean up pendingReinstalls on failure to avoid stale entries
     pendingReinstalls.delete(serverName);
@@ -2201,7 +2250,7 @@ const filterToolsByConfig = async (serverName: string, tools: Tool[]): Promise<T
 
 // Get server by tool name
 const getServerByTool = (toolName: string): ServerInfo | undefined => {
-  return serverInfos.find(
+  return getVisibleServerInfos().find(
     (serverInfo) =>
       serverInfo.enabled !== false && serverInfo.tools.some((tool) => tool.name === toolName),
   );
@@ -2239,7 +2288,7 @@ export const removeServer = async (
   try {
     await removeServerToolEmbeddings(name);
   } catch (error) {
-    console.warn('Failed to remove embeddings for server', { serverName: name, error });
+    logger.warn('Failed to remove embeddings for server', { serverName: name, error });
   }
 
   serverInfos = serverInfos.filter((serverInfo) => serverInfo.name !== name);
@@ -2275,7 +2324,7 @@ export const addOrUpdateServer = async (
     const action = exists ? 'updated' : 'added';
     return { success: true, message: `Server ${action} successfully` };
   } catch (error) {
-    console.error('Failed to add/update server', { serverName: name, error });
+    logger.error('Failed to add/update server', { serverName: name, error });
     return { success: false, message: 'Failed to add/update server' };
   }
 };
@@ -2306,7 +2355,7 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
   if (serverInfo.keepAliveIntervalId) {
     clearInterval(serverInfo.keepAliveIntervalId);
     serverInfo.keepAliveIntervalId = undefined;
-    console.log('Cleared MCP server keep-alive interval');
+    logger.log('Cleared MCP server keep-alive interval');
   }
 
   const candidateTransport = serverInfo.transport as
@@ -2320,7 +2369,7 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
     try {
       serverInfo.client.close();
     } catch {
-      console.warn('Error closing MCP client during runtime shutdown');
+      logger.warn('Error closing MCP client during runtime shutdown');
     }
     serverInfo.client = undefined;
   }
@@ -2329,7 +2378,7 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
     try {
       serverInfo.transport.close();
     } catch {
-      console.warn('Error closing MCP transport during runtime shutdown');
+      logger.warn('Error closing MCP transport during runtime shutdown');
     }
     serverInfo.transport = undefined;
   }
@@ -2338,11 +2387,12 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
     killStdioProcessTree(serverInfo.name, stdioPid);
   }
 
-  console.log('Closed MCP server client and transport');
+  logger.log('Closed MCP server client and transport');
 };
 
-// Close server client and transport
-function closeServer(name: string) {
+// Close server client and transport (keeps the entry in serverInfos; the next
+// initializeClientsFromSettings rebuild drops it if it is no longer configured).
+export function closeServer(name: string) {
   const serverInfo = serverInfos.find((serverInfo) => serverInfo.name === name);
   if (serverInfo) {
     closeServerRuntime(serverInfo);
@@ -2368,7 +2418,7 @@ const shutdownOnDemandServer = (serverInfo: ServerInfo): void => {
   closeServerRuntime(serverInfo);
 
   serverInfo.status = 'disconnected';
-  console.log(
+  logger.log(
     `[${serverInfo.name}] On-demand server shut down after idle; ` +
       `${serverInfo.tools.length} tools cached for next wake-up`,
   );
@@ -2435,7 +2485,7 @@ const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
     }
 
     const name = rawConfig.name;
-    console.log(`[${name}] Cold-starting on-demand server…`);
+    logger.log(`[${name}] Cold-starting on-demand server…`);
 
     const transport = await createTransportFromConfig(name, expandedConf);
     const client = createUpstreamMcpClient(name, () => serverInfo);
@@ -2472,7 +2522,7 @@ const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
         updateServerToolsCache(serverInfo, tools.tools);
         broadcastToolListChanged();
       } catch (error) {
-        console.warn(`[${name}] Failed to list tools during wake`, {
+        logger.warn(`[${name}] Failed to list tools during wake`, {
           error: summarizeErrorForLogging(error),
         });
       }
@@ -2483,7 +2533,7 @@ const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
         promptCount = prompts.prompts.length;
         updateServerPromptsCache(serverInfo, prompts.prompts);
       } catch (error) {
-        console.warn(`[${name}] Failed to list prompts during wake`, {
+        logger.warn(`[${name}] Failed to list prompts during wake`, {
           error: summarizeErrorForLogging(error),
         });
       }
@@ -2494,7 +2544,7 @@ const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
         resourceCount = resources.resources.length;
         updateServerResourcesCache(serverInfo, resources.resources);
       } catch (error) {
-        console.warn(`[${name}] Failed to list resources during wake`, {
+        logger.warn(`[${name}] Failed to list resources during wake`, {
           error: summarizeErrorForLogging(error),
         });
       }
@@ -2503,7 +2553,7 @@ const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
     // No-op for stdio transports; only SSE/streamable-http opt in via enableKeepAlive.
     setupServerKeepAlive(serverInfo, expandedConf);
 
-    console.log(
+    logger.log(
       `[${name}] On-demand server ready in ${Date.now() - spawnStart}ms` +
         ` (${toolCount} tools, ${promptCount} prompts, ${resourceCount} resources)`,
     );
@@ -2549,16 +2599,16 @@ const primeOnDemandServers = (): Promise<void> => {
   );
   if (targets.length === 0) return Promise.resolve();
 
-  console.log(`Priming ${targets.length} on-demand server(s) for tool discovery…`);
+  logger.log(`Priming ${targets.length} on-demand server(s) for tool discovery…`);
   return Promise.allSettled(
     targets.map(async (si) => {
       try {
         await ensureServerReady(si);
         // Sleep the child but keep the cached tool list visible to agents.
         shutdownOnDemandServer(si);
-        console.log('On-demand server primed and asleep');
+        logger.log('On-demand server primed and asleep');
       } catch (error) {
-        console.warn('Failed to prime on-demand server', {
+        logger.warn('Failed to prime on-demand server', {
           error: summarizeErrorForLogging(error),
         });
       }
@@ -2593,7 +2643,28 @@ export const resetServerOAuthConnection = (name: string): boolean => {
 // launched through a wrapper like `npx` / `npm exec`, the wrapper does not
 // forward signals to its descendants, so the real server process is left
 // running as an orphan. Walk the whole tree and force-kill it.
+//
+// When the process-lister tool tree-kill needs (`ps` on Linux) is missing —
+// e.g. slim Docker images without procps — tree-kill's internal spawn fails
+// with an unhandled 'error' event that would crash MCPHub. Fall back to
+// signaling just the direct child instead (issue #1072).
 function killStdioProcessTree(name: string, pid: number): void {
+  const safeDirectKill = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+    try {
+      process.kill(pid, signal);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ESRCH') {
+        logger.warn('Failed to send signal to process', {
+          serverName: name,
+          pid,
+          signal,
+          err,
+        });
+      }
+    }
+  };
+
   const safeTreeKill = (signal: 'SIGTERM' | 'SIGKILL'): void => {
     try {
       treeKill(pid, signal, (err) => {
@@ -2605,7 +2676,7 @@ function killStdioProcessTree(name: string, pid: number): void {
             // Pass the user-controlled `name` as a separate argument so a
             // server named e.g. "%s" cannot inject format specifiers into the
             // log line (CodeQL: use-of-externally-controlled-format-string).
-            console.warn('Failed to send signal to process tree', {
+            logger.warn('Failed to send signal to process tree', {
               serverName: name,
               pid,
               signal,
@@ -2615,7 +2686,7 @@ function killStdioProcessTree(name: string, pid: number): void {
         }
       });
     } catch (err) {
-      console.warn('Failed to send signal to process tree', {
+      logger.warn('Failed to send signal to process tree', {
         serverName: name,
         pid,
         signal,
@@ -2624,13 +2695,24 @@ function killStdioProcessTree(name: string, pid: number): void {
     }
   };
 
-  safeTreeKill('SIGTERM');
+  const safeKill = isProcessTreeKillAvailable()
+    ? safeTreeKill
+    : (signal: 'SIGTERM' | 'SIGKILL'): void => {
+        logger.warn('Process lister unavailable, killing only the direct child process', {
+          serverName: name,
+          pid,
+          signal,
+        });
+        safeDirectKill(signal);
+      };
+
+  safeKill('SIGTERM');
 
   setTimeout(() => {
     if (!isProcessAlive(pid)) {
       return;
     }
-    safeTreeKill('SIGKILL');
+    safeKill('SIGKILL');
   }, STDIO_KILL_GRACE_PERIOD_MS);
 }
 
@@ -2670,9 +2752,9 @@ export const toggleServerStatus = async (
       // Remove tool embeddings when server is disabled (for smart routing consistency)
       try {
         await removeServerToolEmbeddings(name);
-        console.log(`Removed tool embeddings for disabled server: ${name}`);
+        logger.log(`Removed tool embeddings for disabled server: ${name}`);
       } catch (embeddingError) {
-        console.warn('Failed to remove embeddings for server', {
+        logger.warn('Failed to remove embeddings for server', {
           serverName: name,
           error: summarizeErrorForLogging(embeddingError),
         });
@@ -2681,9 +2763,9 @@ export const toggleServerStatus = async (
       // If enabling, reconnect the server to restore connection and sync tool embeddings
       try {
         await initializeClientsFromSettings(false, name);
-        console.log(`Re-enabled server ${name} and triggered tool embedding sync`);
+        logger.log(`Re-enabled server ${name} and triggered tool embedding sync`);
       } catch (reconnectError) {
-        console.warn('Failed to reconnect server during enable', {
+        logger.warn('Failed to reconnect server during enable', {
           serverName: name,
           error: summarizeErrorForLogging(reconnectError),
         });
@@ -2692,7 +2774,7 @@ export const toggleServerStatus = async (
 
     return { success: true, message: `Server ${enabled ? 'enabled' : 'disabled'} successfully` };
   } catch (error) {
-    console.error('Failed to toggle server status', { serverName: name, error });
+    logger.error('Failed to toggle server status', { serverName: name, error });
     return { success: false, message: 'Failed to toggle server status' };
   }
 };
@@ -2941,7 +3023,7 @@ const projectToolForDownstream = (
 export const handleListToolsRequest = async (_: any, extra: any) => {
   const sessionId = extra.sessionId || '';
   const group = getGroup(sessionId);
-  console.log(`Handling ListToolsRequest for group: ${group}`);
+  logger.log(`Handling ListToolsRequest for group: ${group}`);
 
   // Special handling for $smart group to return smart routing tools
   // Support both $smart and $smart/{group} patterns
@@ -2958,10 +3040,7 @@ export const handleListToolsRequest = async (_: any, extra: any) => {
   await Promise.allSettled(
     filteredServerInfos
       .filter(
-        (si) =>
-          si.config?.startOnDemand === true &&
-          si.tools.length === 0 &&
-          si.spawningPromise,
+        (si) => si.config?.startOnDemand === true && si.tools.length === 0 && si.spawningPromise,
       )
       .map((si) => si.spawningPromise as Promise<void>),
   );
@@ -3007,7 +3086,7 @@ export const handleListToolsRequest = async (_: any, extra: any) => {
 };
 
 export const handleCallToolRequest = async (request: any, extra: any) => {
-  console.log('Handling CallToolRequest for tool', summarizeToolRequestForLogging(request.params));
+  logger.log('Handling CallToolRequest for tool', summarizeToolRequestForLogging(request.params));
   const startTime = Date.now();
   const activityLogger = getActivityLoggingService();
 
@@ -3015,6 +3094,23 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
   const requestContextService = RequestContextService.getInstance();
   const bearerKeyContext = requestContextService.getBearerKeyContext();
   const sessionId = extra.sessionId || '';
+
+  // For OpenAPI cookie-session isolation, use a real per-caller session id.
+  // Direct API controllers fall back to shared synthetic ids ('api-session' /
+  // 'openapi-session') when x-session-id is absent, which would leak cookies
+  // across callers, so only accept an explicitly-provided session header or a
+  // non-synthetic extra.sessionId. Fail-safe (undefined) otherwise.
+  const isSyntheticSessionFallback = (id: string) =>
+    id === 'api-session' || id === 'openapi-session';
+  const explicitXSessionId = extra?.headers?.['x-session-id'];
+  const cookieSessionId = [
+    requestContextService.getSessionId(),
+    typeof explicitXSessionId === 'string' ? explicitXSessionId : undefined,
+    typeof extra?.sessionId === 'string' ? extra.sessionId : undefined,
+  ].find(
+    (id): id is string =>
+      typeof id === 'string' && id.length > 0 && !isSyntheticSessionFallback(id),
+  );
 
   // Extract group and key info from request context (set by SSE/HTTP handlers)
   // Fallback to extra for backward compatibility (e.g., direct API calls)
@@ -3086,7 +3182,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       if (singleServerAppsRoute) {
         targetServerInfo = appsRouteContext.serverInfo;
       } else if (extra && extra.server) {
-        targetServerInfo = getServerByName(extra.server);
+        targetServerInfo = getVisibleServerByName(extra.server);
       } else if (getGroupLookupName(group)) {
         const groupTool = await resolveToolInGroup(group, toolName, false);
         if (groupTool) {
@@ -3098,7 +3194,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         // Find the first server that has this tool.
         // On-demand servers may be sleeping (disconnected) but still advertise
         // their cached tool list — include them as candidates.
-        targetServerInfo = serverInfos.find(
+        targetServerInfo = getVisibleServerInfos().find(
           (serverInfo) =>
             serverInfo.enabled !== false &&
             (serverInfo.status === 'connected' || serverInfo.config?.startOnDemand === true) &&
@@ -3142,7 +3238,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         // Use toolArgs if it has properties, otherwise fallback to request.params.arguments
         const finalArgs = toolArgs && typeof toolArgs === 'object' ? toolArgs : {};
 
-        console.log('Invoking OpenAPI tool', {
+        logger.log('Invoking OpenAPI tool', {
           toolName: targetToolName,
           serverName: targetServerInfo.name,
           arguments: summarizeArgumentsForLogging(finalArgs),
@@ -3179,14 +3275,20 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         }
 
         await reserveHostedIfNeeded(targetServerInfo.name, cleanToolName);
-        const result = await openApiClient.callTool(cleanToolName, finalArgs, passthroughHeaders);
+        const result = await openApiClient.callTool(
+          cleanToolName,
+          finalArgs,
+          passthroughHeaders,
+          false,
+          cookieSessionId,
+        );
         await settleHostedIfNeeded({
           success: true,
           requestContent: finalArgs,
           responseContent: result,
         });
 
-        console.log('OpenAPI tool invocation result', {
+        logger.log('OpenAPI tool invocation result', {
           serverName: targetServerInfo.name,
           toolName: cleanToolName,
           result: summarizeToolResultForLogging(result),
@@ -3238,7 +3340,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       // Use toolArgs if it has properties, otherwise fallback to request.params.arguments
       const finalArgs = toolArgs && typeof toolArgs === 'object' ? toolArgs : {};
 
-      console.log('Invoking tool', {
+      logger.log('Invoking tool', {
         toolName: targetToolName,
         serverName: targetServerInfo.name,
         arguments: summarizeArgumentsForLogging(finalArgs),
@@ -3263,7 +3365,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         responseContent: result,
       });
 
-      console.log('Tool invocation result', {
+      logger.log('Tool invocation result', {
         serverName: targetServerInfo.name,
         toolName: cleanToolName,
         result: summarizeToolResultForLogging(result),
@@ -3311,14 +3413,11 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         : undefined;
     const serverInfo = singleServerAppsRoute
       ? appsRouteContext.serverInfo
-      : (groupTool?.serverInfo ??
-        (lookupGroup ? undefined : getServerByTool(request.params.name)));
+      : (groupTool?.serverInfo ?? (lookupGroup ? undefined : getServerByTool(request.params.name)));
     const routeToolName = groupTool?.toolName ?? request.params.name;
     const tool =
       groupTool?.tool ??
-      (serverInfo
-        ? findToolOnServer(serverInfo, routeToolName, singleServerAppsRoute)
-        : undefined);
+      (serverInfo ? findToolOnServer(serverInfo, routeToolName, singleServerAppsRoute) : undefined);
     if (!serverInfo || !tool) {
       throw new Error(`Server not found: ${request.params.name}`);
     }
@@ -3340,7 +3439,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       // Remove server prefix from tool name if present
       const cleanToolName = normalizeToolNameForServer(serverInfo.name, routeToolName);
 
-      console.log('Invoking OpenAPI tool', {
+      logger.log('Invoking OpenAPI tool', {
         toolName: cleanToolName,
         serverName: serverInfo.name,
         arguments: summarizeArgumentsForLogging(request.params.arguments),
@@ -3375,14 +3474,20 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
 
       const finalArgs = request.params.arguments || {};
       await reserveHostedIfNeeded(serverInfo.name, cleanToolName);
-      const result = await openApiClient.callTool(cleanToolName, finalArgs, passthroughHeaders);
+      const result = await openApiClient.callTool(
+        cleanToolName,
+        finalArgs,
+        passthroughHeaders,
+        false,
+        cookieSessionId,
+      );
       await settleHostedIfNeeded({
         success: true,
         requestContent: finalArgs,
         responseContent: result,
       });
 
-      console.log('OpenAPI tool invocation result', {
+      logger.log('OpenAPI tool invocation result', {
         serverName: serverInfo.name,
         toolName: cleanToolName,
         result: summarizeToolResultForLogging(result),
@@ -3445,7 +3550,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       requestContent: request.params.arguments,
       responseContent: result,
     });
-    console.log('Tool call result', {
+    logger.log('Tool call result', {
       serverName: serverInfo.name,
       toolName: cleanToolName,
       result: summarizeToolResultForLogging(result),
@@ -3477,7 +3582,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       group,
     });
   } catch (error) {
-    console.error('Error handling CallToolRequest', summarizeErrorForLogging(error));
+    logger.error('Error handling CallToolRequest', summarizeErrorForLogging(error));
 
     // Log error activity
     const duration = Date.now() - startTime;
@@ -3550,7 +3655,7 @@ export const handleGetPromptRequest = async (request: any, extra: any) => {
     let promptNameForServer = name;
     const lookupGroup = getGroupLookupName(group);
     if (extra && extra.server) {
-      server = getServerByName(extra.server);
+      server = getVisibleServerByName(extra.server);
     } else if (lookupGroup) {
       const groupPrompt = await resolvePromptInGroup(lookupGroup, name);
       if (groupPrompt) {
@@ -3559,7 +3664,7 @@ export const handleGetPromptRequest = async (request: any, extra: any) => {
       }
     } else {
       // Find the first server that has this prompt
-      server = serverInfos.find(
+      server = getVisibleServerInfos().find(
         (serverInfo) =>
           serverInfo.status === 'connected' &&
           serverInfo.enabled !== false &&
@@ -3582,19 +3687,19 @@ export const handleGetPromptRequest = async (request: any, extra: any) => {
       arguments: promptArgs,
     };
     // Log the final promptParams
-    console.log('Calling getPrompt with params', {
+    logger.log('Calling getPrompt with params', {
       name: cleanPromptName || '',
       arguments: summarizeArgumentsForLogging(promptArgs),
     });
     const prompt = await server.client?.getPrompt(promptParams);
-    console.log('Received prompt', summarizePromptForLogging(prompt));
+    logger.log('Received prompt', summarizePromptForLogging(prompt));
     if (!prompt) {
       throw new Error(`Prompt not found: ${cleanPromptName}`);
     }
 
     return prompt;
   } catch (error) {
-    console.error('Error handling GetPromptRequest', summarizeErrorForLogging(error));
+    logger.error('Error handling GetPromptRequest', summarizeErrorForLogging(error));
     const safeErrorText = formatErrorForLogging(error);
     return {
       content: [
@@ -3612,7 +3717,7 @@ export const handleListPromptsRequest = async (_: any, extra: any) => {
   const sessionId = extra.sessionId || '';
   const group = getGroup(sessionId);
   const lookupGroup = getGroupLookupName(group);
-  console.log(`Handling ListPromptsRequest for group: ${group}`);
+  logger.log(`Handling ListPromptsRequest for group: ${group}`);
 
   // Start with built-in prompts (only enabled ones)
   const builtinPrompts = await getBuiltinPromptDao().findEnabled();
@@ -3674,7 +3779,7 @@ export const handleListResourcesRequest = async (_: any, extra: any) => {
   const sessionId = extra.sessionId || '';
   const group = getGroup(sessionId);
   const lookupGroup = getGroupLookupName(group);
-  console.log(`Handling ListResourcesRequest for group: ${group}`);
+  logger.log(`Handling ListResourcesRequest for group: ${group}`);
   const appsRouteContext = await getMcpAppsRouteContext(sessionId, group);
 
   // Start with built-in resources (only enabled ones)
@@ -3736,7 +3841,7 @@ export const handleListResourceTemplatesRequest = async (_: any, extra: any) => 
   const sessionId = extra.sessionId || '';
   const group = getGroup(sessionId);
   const lookupGroup = getGroupLookupName(group);
-  console.log(`Handling ListResourceTemplatesRequest for group: ${group}`);
+  logger.log(`Handling ListResourceTemplatesRequest for group: ${group}`);
   const appsRouteContext = await getMcpAppsRouteContext(sessionId, group);
 
   const { filteredServerInfos, serverConfigsByName } = await getFilteredServerInfosForGroup(
@@ -3870,7 +3975,7 @@ export const handleReadResourceRequest = async (request: any, extra: any) => {
           ),
         };
   } catch (error) {
-    console.error('Error handling ReadResourceRequest', summarizeErrorForLogging(error));
+    logger.error('Error handling ReadResourceRequest', summarizeErrorForLogging(error));
     const safeErrorText = formatErrorForLogging(error);
     return {
       contents: [
@@ -3968,7 +4073,7 @@ export const getFilteredServerInfosForGroup = async (
   );
 
   const filteredServerInfos: ServerInfo[] = [];
-  for (const serverInfo of getDataService().filterData(serverInfos)) {
+  for (const serverInfo of getVisibleServerInfos()) {
     if (serverInfo.enabled === false) continue;
     if (options?.requireClient && !serverInfo.client) continue;
 

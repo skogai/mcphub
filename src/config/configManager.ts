@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import { McpSettings, IUser } from '../types/index.js';
 import { getPackageVersion } from '../utils/version.js';
+import { normalizeBasePath } from '../utils/basePath.js';
 import { getDataService } from '../services/services.js';
 import { DataService } from '../services/dataService.js';
 import { DaoConfigService, createDaoConfigService } from './DaoConfigService.js';
+import { logger } from '../utils/logger.js';
 import {
   loadOriginalSettings as legacyLoadSettings,
   saveSettings as legacySaveSettings,
@@ -15,7 +17,7 @@ dotenv.config();
 const defaultConfig = {
   port: process.env.PORT || 3000,
   initTimeout: process.env.INIT_TIMEOUT || 300000,
-  basePath: process.env.BASE_PATH || '',
+  basePath: normalizeBasePath(process.env.BASE_PATH),
   readonly: 'true' === process.env.READONLY || false,
   mcpHubName: 'mcphub',
   mcpHubVersion: getPackageVersion(),
@@ -33,10 +35,10 @@ const daoConfigService: DaoConfigService = createDaoConfigService();
  */
 export const loadSettings = async (user?: IUser): Promise<McpSettings> => {
   if (USE_DAO_LAYER) {
-    console.log('Loading settings using DAO layer');
+    logger.log('Loading settings using DAO layer');
     return await daoConfigService.loadSettings(user);
   } else {
-    console.log('Loading settings using legacy approach');
+    logger.log('Loading settings using legacy approach');
     const settings = legacyLoadSettings();
     return dataService.filterSettings!(settings, user);
   }
@@ -47,10 +49,10 @@ export const loadSettings = async (user?: IUser): Promise<McpSettings> => {
  */
 export const saveSettings = async (settings: McpSettings, user?: IUser): Promise<boolean> => {
   if (USE_DAO_LAYER) {
-    console.log('Saving settings using DAO layer');
+    logger.log('Saving settings using DAO layer');
     return await daoConfigService.saveSettings(settings, user);
   } else {
-    console.log('Saving settings using legacy approach');
+    logger.log('Saving settings using legacy approach');
     const mergedSettings = dataService.mergeSettings!(legacyLoadSettings(), settings, user);
     return legacySaveSettings(mergedSettings, user);
   }
@@ -111,7 +113,7 @@ export const getDaoConfigService = (): DaoConfigService => {
  */
 export const migrateToDao = async (): Promise<boolean> => {
   try {
-    console.log('Starting migration from legacy format to DAO layer...');
+    logger.log('Starting migration from legacy format to DAO layer...');
 
     // Load data using legacy method
     const legacySettings = legacyLoadSettings();
@@ -121,15 +123,15 @@ export const migrateToDao = async (): Promise<boolean> => {
     const success = await saveSettings(legacySettings);
 
     if (success) {
-      console.log('Migration completed successfully');
+      logger.log('Migration completed successfully');
       return true;
     } else {
-      console.error('Migration failed during save operation');
+      logger.error('Migration failed during save operation');
       switchToLegacy();
       return false;
     }
   } catch (error) {
-    console.error('Migration failed:', error);
+    logger.error('Migration failed:', error);
     switchToLegacy();
     return false;
   }
