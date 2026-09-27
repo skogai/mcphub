@@ -2024,8 +2024,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         systemConfig.smartRouting.llmProviderApiKey = smartRouting.llmProviderApiKey?.trim();
       }
       if (typeof smartRouting.embeddingModel === 'string') {
-        systemConfig.smartRouting.embeddingModel =
-          smartRouting.embeddingModel?.trim();
+        systemConfig.smartRouting.embeddingModel = smartRouting.embeddingModel?.trim();
       }
 
       if (typeof smartRouting.azureOpenaiEndpoint === 'string') {
@@ -2071,9 +2070,9 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
           systemConfig.smartRouting.embeddingDimensionsApiPassthrough ||
         previousSmartRoutingConfig.llmProviderBaseUrl !==
           systemConfig.smartRouting.llmProviderBaseUrl ||
-        previousSmartRoutingConfig.llmProviderApiKey !== systemConfig.smartRouting.llmProviderApiKey ||
-        previousSmartRoutingConfig.embeddingModel !==
-          systemConfig.smartRouting.embeddingModel ||
+        previousSmartRoutingConfig.llmProviderApiKey !==
+          systemConfig.smartRouting.llmProviderApiKey ||
+        previousSmartRoutingConfig.embeddingModel !== systemConfig.smartRouting.embeddingModel ||
         previousSmartRoutingConfig.azureOpenaiEndpoint !==
           systemConfig.smartRouting.azureOpenaiEndpoint ||
         previousSmartRoutingConfig.azureOpenaiApiKey !==

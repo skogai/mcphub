@@ -14,9 +14,7 @@ const WELL_KNOWN_BIN_DIRS = ['/bin', '/usr/bin', '/sbin', '/usr/sbin'];
 
 function findExecutableOnDisk(name: string): boolean {
   const candidates = WELL_KNOWN_BIN_DIRS.map((dir) => path.join(dir, name));
-  const pathDirs = (process.env.PATH ?? '')
-    .split(path.delimiter)
-    .filter((dir) => dir.length > 0);
+  const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter((dir) => dir.length > 0);
   candidates.push(...pathDirs.map((dir) => path.join(dir, name)));
 
   for (const candidate of candidates) {
@@ -40,9 +38,7 @@ function findExecutableOnDisk(name: string): boolean {
 export function isProcessTreeKillAvailable(): boolean {
   if (cachedAvailability === null) {
     cachedAvailability =
-      process.platform === 'win32' ||
-      process.platform === 'darwin' ||
-      findExecutableOnDisk('ps');
+      process.platform === 'win32' || process.platform === 'darwin' || findExecutableOnDisk('ps');
   }
   return cachedAvailability;
 }

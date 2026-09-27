@@ -15,9 +15,7 @@ import { OpenAPIClient } from '../clients/openapi.js';
 import type { ServerConfig, OpenApiToolStats } from '../types/index.js';
 import { itemCostForTool } from '../utils/tokenCost.js';
 
-export async function previewOpenApiToolStats(
-  config: ServerConfig,
-): Promise<OpenApiToolStats> {
+export async function previewOpenApiToolStats(config: ServerConfig): Promise<OpenApiToolStats> {
   // Throwaway client: initialize() fetches (or parses) the spec, dereferences
   // it and runs extractTools() — exactly what a real connection would do. No
   // DAO writes happen here; persistOAuth2Token is left unset so any token

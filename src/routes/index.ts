@@ -1,4 +1,7 @@
-import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
+import {
+  listMyCredentials,
+  updateMyCredential,
+} from '../controllers/credentialBindingController.js';
 import express from 'express';
 import { check } from 'express-validator';
 import config from '../config/index.js';

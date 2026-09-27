@@ -113,9 +113,7 @@ export class ServerDaoImpl extends JsonFileBaseDao implements ServerDao {
       // persist them (see ServerDaoDbImpl). Unpack + strip the mirrored keys
       // here too so JSON-mode behaves the same way: no duplicate/stale
       // options.startOnDemand noise in mcp_settings.json or API responses.
-      const { options, startOnDemand, idleTimeoutMs } = unpackStartOnDemandOptions(
-        config.options,
-      );
+      const { options, startOnDemand, idleTimeoutMs } = unpackStartOnDemandOptions(config.options);
 
       servers.push({
         name,

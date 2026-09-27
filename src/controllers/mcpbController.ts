@@ -19,10 +19,9 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const timestamp = Date.now();
     // Sanitize the original name so the stored path cannot escape the upload directory
-    const safeOriginalName = path.parse(path.basename(file.originalname)).name.replace(
-      /[^A-Za-z0-9._-]/g,
-      '_',
-    );
+    const safeOriginalName = path
+      .parse(path.basename(file.originalname))
+      .name.replace(/[^A-Za-z0-9._-]/g, '_');
     cb(null, `${safeOriginalName}-${timestamp}.mcpb`);
   },
 });

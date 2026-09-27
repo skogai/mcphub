@@ -108,7 +108,12 @@ describe('openApiRequestBody utils (#1078)', () => {
       );
 
       expect(parts).toEqual([
-        { name: 'file', value: Buffer.from('hi'), filename: 'upload', contentType: 'application/octet-stream' },
+        {
+          name: 'file',
+          value: Buffer.from('hi'),
+          filename: 'upload',
+          contentType: 'application/octet-stream',
+        },
         { name: 'comment', value: 'ok' },
       ]);
     });
@@ -150,9 +155,7 @@ describe('openApiRequestBody utils (#1078)', () => {
         },
       ];
 
-      expect(() => serializeMultipartBody(parts, 'BOUNDARY')).toThrow(
-        /content type.*CR or LF/i,
-      );
+      expect(() => serializeMultipartBody(parts, 'BOUNDARY')).toThrow(/content type.*CR or LF/i);
     });
 
     test('preserves quoted MIME parameters in content types', () => {
@@ -174,7 +177,12 @@ describe('openApiRequestBody utils (#1078)', () => {
 
   describe('encodeFormUrlEncoded', () => {
     test('repeats array keys, JSON-stringifies objects, skips nullish values', () => {
-      const encoded = encodeFormUrlEncoded({ name: 'a b', tags: ['x', 'y'], meta: { k: 1 }, skip: null });
+      const encoded = encodeFormUrlEncoded({
+        name: 'a b',
+        tags: ['x', 'y'],
+        meta: { k: 1 },
+        skip: null,
+      });
       const expected = new URLSearchParams([
         ['name', 'a b'],
         ['tags', 'x'],

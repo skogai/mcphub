@@ -32,6 +32,10 @@ temp-test-config/
 # GitGuardian cache
 .cache_ggshield
 
+# personal local tooling/notes (not part of the shared repo setup)
+mise.toml
+LOCAL_SETUP.md
+
 # Encrypted personal credential store (back up separately)
 *.credentials.json
 *.credentials.json.*.tmp

@@ -717,9 +717,7 @@ const getDimensionsForModel = (model: string, configuredDimensions?: number): nu
  */
 const supportsDimensionsParameter = (model: string): boolean => {
   const normalized = model.toLowerCase();
-  return (
-    normalized.includes('text-embedding-3') || normalized.includes('gemini-embedding')
-  );
+  return normalized.includes('text-embedding-3') || normalized.includes('gemini-embedding');
 };
 
 /**

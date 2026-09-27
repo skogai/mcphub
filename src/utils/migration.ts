@@ -118,7 +118,8 @@ export async function migrateToDatabase(): Promise<boolean> {
     // Ciphertext is portable between persistence backends; the encryption key stays external.
     const credentialDao = new CredentialBindingDaoDbImpl();
     for (const binding of new CredentialBindingDaoImpl().readAll()) {
-      if (!(await credentialDao.get(binding.serverName, binding.username))) await credentialDao.save(binding);
+      if (!(await credentialDao.get(binding.serverName, binding.username)))
+        await credentialDao.save(binding);
     }
 
     // Migrate groups

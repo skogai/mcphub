@@ -518,8 +518,7 @@ export async function exportGroupTemplate(
   if (!group) return null;
 
   if (requestingUser && !requestingUser.isAdmin) {
-    const visible = getDataService()
-      .filterData([group], requestingUser);
+    const visible = getDataService().filterData([group], requestingUser);
     if (visible.length === 0) return null;
   }
 

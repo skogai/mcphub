@@ -213,7 +213,9 @@ export function buildMultipartParts(
   schema?: OpenAPIV3.SchemaObject,
 ): MultipartPart[] {
   if (!bodyValue || typeof bodyValue !== 'object' || Array.isArray(bodyValue)) {
-    throw new Error('multipart/form-data request body must be provided as an object of form fields');
+    throw new Error(
+      'multipart/form-data request body must be provided as an object of form fields',
+    );
   }
 
   const properties = schema?.properties as Record<string, OpenAPIV3.SchemaObject> | undefined;
@@ -261,13 +263,14 @@ export function serializeMultipartBody(parts: MultipartPart[], boundary: string)
       );
       const contentType = part.contentType ?? DEFAULT_UPLOAD_CONTENT_TYPE;
       assertValidMultipartContentType(contentType);
-      chunks.push(
-        Buffer.from(`Content-Type: ${contentType}\r\n\r\n`, 'utf8'),
-      );
+      chunks.push(Buffer.from(`Content-Type: ${contentType}\r\n\r\n`, 'utf8'));
       chunks.push(part.value as Buffer);
     } else {
       chunks.push(
-        Buffer.from(`Content-Disposition: form-data; name="${sanitizeHeaderToken(part.name)}"\r\n\r\n`, 'utf8'),
+        Buffer.from(
+          `Content-Disposition: form-data; name="${sanitizeHeaderToken(part.name)}"\r\n\r\n`,
+          'utf8',
+        ),
       );
       chunks.push(Buffer.from(String(part.value), 'utf8'));
     }

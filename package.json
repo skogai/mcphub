@@ -199,6 +199,9 @@
       "esbuild",
       "sharp",
       "unrs-resolver"
+    ],
+    "onlyBuiltDependencies": [
+      "protobufjs"
     ]
   }
 }

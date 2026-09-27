@@ -56,8 +56,11 @@ export const unpackStartOnDemandOptions = (
     return { options: undefined, startOnDemand: undefined, idleTimeoutMs: undefined };
   }
 
-  const { startOnDemand: rawStartOnDemand, idleTimeoutMs: rawIdleTimeoutMs, ...rest } =
-    options as Record<string, unknown>;
+  const {
+    startOnDemand: rawStartOnDemand,
+    idleTimeoutMs: rawIdleTimeoutMs,
+    ...rest
+  } = options as Record<string, unknown>;
 
   return {
     options: Object.keys(rest).length > 0 ? (rest as ServerConfig['options']) : undefined,

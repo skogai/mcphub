@@ -6,11 +6,7 @@ import { CookieJar } from 'tough-cookie';
 import SwaggerParser from '@apidevtools/swagger-parser';
 import * as yaml from 'js-yaml';
 import { OpenAPIV3 } from 'openapi-types';
-import {
-  ServerConfig,
-  OpenAPISecurityConfig,
-  OpenAPIDeclaredSecurity,
-} from '../types/index.js';
+import { ServerConfig, OpenAPISecurityConfig, OpenAPIDeclaredSecurity } from '../types/index.js';
 import { assertSafeUrl, UnsafeUrlError, createRedirectValidatingFetch } from '../utils/ssrf.js';
 import { getUserDao } from '../dao/index.js';
 import { sanitizeStringForLogging, createSafeJSON } from '../utils/serialization.js';
@@ -1191,10 +1187,7 @@ export class OpenAPIClient {
           // Unknown name or an unresolved reference — try the next alternative.
           continue;
         }
-        const mapped = this.mapSecurityScheme(
-          schemeName,
-          scheme as OpenAPIV3.SecuritySchemeObject,
-        );
+        const mapped = this.mapSecurityScheme(schemeName, scheme as OpenAPIV3.SecuritySchemeObject);
         if (mapped.ok) {
           return {
             declared: true,

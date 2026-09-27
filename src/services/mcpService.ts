@@ -3,7 +3,11 @@ import type { RequestPrincipal } from './authorizationService.js';
 import { PrincipalRuntimeService } from './principalRuntimeService.js';
 import { UserContextService } from './userContextService.js';
 import { deleteCredentialBindings, missingCredentialError } from './credentialBindingService.js';
-import { CredentialBindingError, hasCredentialTemplate, validateCredentialTemplate } from '../utils/credentialTemplate.js';
+import {
+  CredentialBindingError,
+  hasCredentialTemplate,
+  validateCredentialTemplate,
+} from '../utils/credentialTemplate.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -913,7 +917,9 @@ export const summarizeServerConnections = (
 
 export const getServerConnectionStats = (): ServerConnectionStats => {
   // Personal definitions have no shared connection whose readiness can be checked.
-  return summarizeServerConnections(serverInfos.filter((info) => !hasCredentialTemplate(info.config)));
+  return summarizeServerConnections(
+    serverInfos.filter((info) => !hasCredentialTemplate(info.config)),
+  );
 };
 
 // Returns true if all enabled servers are connected
@@ -1285,7 +1291,11 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
 
   if (conf.type === 'streamable-http') {
     const options: StreamableHTTPClientTransportOptions = {};
-    let headers = conf.headers ? (hasCredentialTemplate(conf) ? conf.headers : replaceEnvVars(conf.headers, env)) : {};
+    let headers = conf.headers
+      ? hasCredentialTemplate(conf)
+        ? conf.headers
+        : replaceEnvVars(conf.headers, env)
+      : {};
     const baseFetch = createAbortIsolatingFetch(createFetchWithProxy(getProxyConfigFromEnv(env)));
     const requestAwareFetch = createRedirectValidatingFetch(
       createRequestContextAwareFetch(baseFetch, conf.passthroughHeaders),
@@ -1293,7 +1303,9 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     );
 
     // Create OAuth provider if configured - SDK will handle authentication automatically
-    const authProvider = hasCredentialTemplate(conf) ? undefined : await createOAuthProvider(name, conf);
+    const authProvider = hasCredentialTemplate(conf)
+      ? undefined
+      : await createOAuthProvider(name, conf);
     if (authProvider) {
       options.authProvider = authProvider;
       // When the OAuth provider is active, strip any static Authorization
@@ -1318,7 +1330,11 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
   } else if (conf.url) {
     // SSE transport
     const options: any = {};
-    let headers = conf.headers ? (hasCredentialTemplate(conf) ? conf.headers : replaceEnvVars(conf.headers, env)) : {};
+    let headers = conf.headers
+      ? hasCredentialTemplate(conf)
+        ? conf.headers
+        : replaceEnvVars(conf.headers, env)
+      : {};
     const baseFetch = createAbortIsolatingFetch(createFetchWithProxy(getProxyConfigFromEnv(env)));
     const requestAwareFetch = createRedirectValidatingFetch(
       createRequestContextAwareFetch(baseFetch, conf.passthroughHeaders),
@@ -1326,7 +1342,9 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     );
 
     // Create OAuth provider if configured - SDK will handle authentication automatically
-    const authProvider = hasCredentialTemplate(conf) ? undefined : await createOAuthProvider(name, conf);
+    const authProvider = hasCredentialTemplate(conf)
+      ? undefined
+      : await createOAuthProvider(name, conf);
     if (authProvider) {
       options.authProvider = authProvider;
       // Drop static Authorization header when OAuth manages auth (see above).
@@ -1406,10 +1424,13 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       transport.stderr.on('data', () => undefined); // Personal upstream diagnostics can contain raw credentials.
     } else if (transport.stderr) {
       observeStdioStderr(transport, transport.stderr, (message) => {
-        logger.log('Upstream server stderr', JSON.stringify({
-          serverName: name,
-          message,
-        }));
+        logger.log(
+          'Upstream server stderr',
+          JSON.stringify({
+            serverName: name,
+            message,
+          }),
+        );
       });
     }
   } else {
@@ -1628,10 +1649,18 @@ export const initializeClientsFromSettings = async (
       if (hasCredentialTemplate(expandedConf)) {
         validateCredentialTemplate(expandedConf);
         nextServerInfos.push({
-          name, owner: expandedConf.owner, visibility: expandedConf.visibility,
-          sharedWithUsers: expandedConf.sharedWithUsers, enabled: true,
-          status: 'disconnected', error: null, tools: [], prompts: [], resources: [],
-          createTime: Date.now(), config: expandedConf,
+          name,
+          owner: expandedConf.owner,
+          visibility: expandedConf.visibility,
+          sharedWithUsers: expandedConf.sharedWithUsers,
+          enabled: true,
+          status: 'disconnected',
+          error: null,
+          tools: [],
+          prompts: [],
+          resources: [],
+          createTime: Date.now(),
+          config: expandedConf,
         });
         continue;
       }
@@ -2186,7 +2215,9 @@ export const getServersInfo = async (
             resolvedType || serverConfig?.description || serverConfig?.command
               ? {
                   ...(resolvedType ? { type: resolvedType } : {}),
-                  ...(hasCredentialTemplate(serverConfig) ? { credentialTemplate: validateCredentialTemplate(serverConfig!) } : {}),
+                  ...(hasCredentialTemplate(serverConfig)
+                    ? { credentialTemplate: validateCredentialTemplate(serverConfig!) }
+                    : {}),
                   ...(serverConfig?.description ? { description: serverConfig.description } : {}),
                   // Expose command so the frontend can determine if reinstall is
                   // supported (npx/uvx only). This is not a secret — it's the
@@ -3457,7 +3488,11 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       // Call the tool on the target server (MCP servers)
       // For servers with perSessionClient: true, use a per-session dedicated client
       let isolatedCtx: IsolatedClientContext | undefined;
-      if (targetServerInfo.config?.perSessionClient && !hasCredentialTemplate(targetServerInfo.config) && sessionId) {
+      if (
+        targetServerInfo.config?.perSessionClient &&
+        !hasCredentialTemplate(targetServerInfo.config) &&
+        sessionId
+      ) {
         const isolated = await getOrCreateIsolatedClient(sessionId, targetServerInfo);
         isolatedCtx = { sessionId, client: isolated.client, transport: isolated.transport };
       } else if (!targetServerInfo.client) {
@@ -3661,7 +3696,11 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
     // Handle MCP servers
     // For servers with perSessionClient: true, use a per-session dedicated client
     let isolatedCtx: IsolatedClientContext | undefined;
-    if (serverInfo.config?.perSessionClient && !hasCredentialTemplate(serverInfo.config) && sessionId) {
+    if (
+      serverInfo.config?.perSessionClient &&
+      !hasCredentialTemplate(serverInfo.config) &&
+      sessionId
+    ) {
       const isolated = await getOrCreateIsolatedClient(sessionId, serverInfo);
       isolatedCtx = { sessionId, client: isolated.client, transport: isolated.transport };
     } else if (!serverInfo.client) {
@@ -4199,13 +4238,11 @@ const createPrincipalRuntime = async (
       const client = new OpenAPIClient(resolvedConfig);
       await client.initialize();
       info.openApiClient = protectClient(client);
-      info.tools = client
-        .getTools()
-        .map((tool) => ({
-          ...tool,
-          name: `${name}${getNameSeparator()}${tool.name}`,
-          inputSchema: cleanInputSchema(tool.inputSchema),
-        }));
+      info.tools = client.getTools().map((tool) => ({
+        ...tool,
+        name: `${name}${getNameSeparator()}${tool.name}`,
+        inputSchema: cleanInputSchema(tool.inputSchema),
+      }));
     } else {
       const transport = await createTransportFromConfig(name, resolvedConfig);
       const client = new Client(

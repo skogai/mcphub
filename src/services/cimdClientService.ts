@@ -91,7 +91,9 @@ export const getCimdSettings = async (): Promise<CimdSettings> => {
 };
 
 const asStringArray = (value: unknown): string[] | undefined =>
-  Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : undefined;
+  Array.isArray(value) && value.every((v) => typeof v === 'string')
+    ? (value as string[])
+    : undefined;
 
 /**
  * Validate a fetched metadata document and map it onto an IOAuthClient.
@@ -143,11 +145,21 @@ export const mapCimdDocument = (
     metadata: {
       application_type: applicationType,
       ...(contacts ? { contacts } : {}),
-      ...(optionalUriField(document.logo_uri) ? { logo_uri: optionalUriField(document.logo_uri) } : {}),
-      ...(optionalUriField(document.client_uri) ? { client_uri: optionalUriField(document.client_uri) } : {}),
-      ...(optionalUriField(document.policy_uri) ? { policy_uri: optionalUriField(document.policy_uri) } : {}),
-      ...(optionalUriField(document.tos_uri) ? { tos_uri: optionalUriField(document.tos_uri) } : {}),
-      ...(optionalUriField(document.jwks_uri) ? { jwks_uri: optionalUriField(document.jwks_uri) } : {}),
+      ...(optionalUriField(document.logo_uri)
+        ? { logo_uri: optionalUriField(document.logo_uri) }
+        : {}),
+      ...(optionalUriField(document.client_uri)
+        ? { client_uri: optionalUriField(document.client_uri) }
+        : {}),
+      ...(optionalUriField(document.policy_uri)
+        ? { policy_uri: optionalUriField(document.policy_uri) }
+        : {}),
+      ...(optionalUriField(document.tos_uri)
+        ? { tos_uri: optionalUriField(document.tos_uri) }
+        : {}),
+      ...(optionalUriField(document.jwks_uri)
+        ? { jwks_uri: optionalUriField(document.jwks_uri) }
+        : {}),
     },
   };
 };

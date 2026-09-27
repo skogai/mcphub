@@ -318,9 +318,9 @@ describe('OpenAPIClient - non-JSON request body content types (#1078)', () => {
         },
       ]);
 
-      await expect(client.callTool('upload_file', { body: { file: 'not base64!!' } })).rejects.toThrow(
-        /'file'.*base64/i,
-      );
+      await expect(
+        client.callTool('upload_file', { body: { file: 'not base64!!' } }),
+      ).rejects.toThrow(/'file'.*base64/i);
       expect(client.httpClient.request).not.toHaveBeenCalled();
     });
 

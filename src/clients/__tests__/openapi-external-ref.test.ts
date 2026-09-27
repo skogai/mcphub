@@ -110,10 +110,7 @@ describe('OpenAPIClient - SSRF guard on external $ref resolution', () => {
 
   it('allows an internal-host $ref for admin-owned servers', async () => {
     findByUsername.mockResolvedValue({ isAdmin: true });
-    const client = makeSchemaClient(
-      'http://127.0.0.1:8081/internal.json#/schemas/Secret',
-      'boss',
-    );
+    const client = makeSchemaClient('http://127.0.0.1:8081/internal.json#/schemas/Secret', 'boss');
     fetchMock.mockResolvedValue(
       refFetchResponse(JSON.stringify({ schemas: { Secret: { type: 'object' } } })),
     );

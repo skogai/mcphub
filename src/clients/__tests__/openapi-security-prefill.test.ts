@@ -187,7 +187,10 @@ describe('OpenAPIClient.getDeclaredSecurity (#1077)', () => {
     schema.security = [{ oidc: [] }];
     schema.components = {
       securitySchemes: {
-        oidc: { type: 'openIdConnect', openIdConnectUrl: 'https://issuer/.well-known/openid-configuration' },
+        oidc: {
+          type: 'openIdConnect',
+          openIdConnectUrl: 'https://issuer/.well-known/openid-configuration',
+        },
       },
     };
 

@@ -1,42 +1,282 @@
 {
   "mcpServers": {
-    "amap": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@amap/amap-maps-mcp-server"
-      ],
-      "env": {
-        "AMAP_MAPS_API_KEY": "your-api-key"
-      }
-    },
     "playwright": {
       "command": "npx",
       "args": [
         "@playwright/mcp@latest",
         "--headless"
-      ]
+      ],
+      "enabled": false,
+      "visibility": "private",
+      "enableKeepAlive": false
     },
-    "fetch": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-fetch"
-      ]
-    },
-    "slack": {
+    "sequential-thinking": {
+      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-slack"
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": false
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "enabled": true,
+      "owner": "admin",
+      "visibility": "private",
+      "enableKeepAlive": false
+    },
+    "gotohuman-mcp-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "build/index.js"
+      ],
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "private",
+      "enableKeepAlive": false,
+      "options": {
+        "resetTimeoutOnProgress": true
+      }
+    },
+    "any-chat-completions": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "https://github.com/pyroprompts/any-chat-completions-mcp"
       ],
       "env": {
-        "SLACK_BOT_TOKEN": "your-bot-token",
-        "SLACK_TEAM_ID": "your-team-id"
+        "AI_CHAT_KEY": "${AI_CHAT_KEY}",
+        "AI_CHAT_NAME": "${AI_CHAT_NAME}",
+        "AI_CHAT_MODEL": "${AI_CHAT_MODEL}",
+        "AI_CHAT_BASE_URL": "${AI_CHAT_BASE_URL}"
+      },
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "private",
+      "enableKeepAlive": false
+    },
+    "skogai-ai-search": {
+      "type": "streamable-http",
+      "url": "https://49ed7b59-26d6-4797-9892-f99f2115dc78.search.ai.cloudflare.com/mcp",
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": true,
+      "keepAliveInterval": 60000,
+      "tools": {
+        "skogai-ai-search-search": {
+          "enabled": true,
+          "description": "Finds exactly what you're looking for"
+        }
+      },
+      "options": {
+        "resetTimeoutOnProgress": true
+      }
+    },
+    "cloudflare mcp": {
+      "type": "streamable-http",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": false,
+      "options": {
+        "resetTimeoutOnProgress": true
+      }
+    },
+    "hf-mcp": {
+      "type": "streamable-http",
+      "url": "https://mcprouter.to/hf-mcp",
+      "headers": {
+        "Authorization": "Bearer sk-FnyJPu4qIhP3MYFY4udxuuIoZYzYAdNdRS6p7Wr96OrX6",
+        "HTTP-Referer": "https://www.mcphub.app",
+        "X-Title": "MCPHub"
+      },
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": false,
+      "options": {
+        "resetTimeoutOnProgress": true
+      }
+    },
+    "obsidian-markdown-notes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "https://github.com/calclavia/mcp-obsidian.git",
+        "${/opt/vault}"
+      ],
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": false
+    },
+    "portal": {
+      "type": "sse",
+      "url": "https://portal.skogai.se/mcp",
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "private",
+      "enableKeepAlive": true,
+      "keepAliveInterval": 60000,
+      "options": {
+        "timeout": 60000,
+        "resetTimeoutOnProgress": true
+      },
+      "oauth": {
+        "clientId": "admin",
+        "clientSecret": "skogsund1!",
+        "pendingAuthorization": {
+          "codeVerifier": "jjI0o9rxZNKl-5mWBM5zfvPWLpxEdHjOWM3TO-chCKy",
+          "createdAt": 1789367046585,
+          "authorizationUrl": "https://portal.skogai.se/authorize?response_type=code&client_id=admin&code_challenge=g2zV8bjQJRsLF2YgaIpMxUP61UvQcVS0ddlSX-mNAt8&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fmcp.skogai.se%2Foauth%2Fcallback&state=eyJzZXJ2ZXIiOiJwb3J0YWwiLCJub25jZSI6ImQ4NzE5NDViMmFlNjgwNmI2ZGE1MDI0MWM4Zjc2NDA4In0&scope=openid&resource=https%3A%2F%2Fportal.skogai.se%2Fmcp",
+          "state": "eyJzZXJ2ZXIiOiJwb3J0YWwiLCJub25jZSI6ImQ4NzE5NDViMmFlNjgwNmI2ZGE1MDI0MWM4Zjc2NDA4In0"
+        }
+      }
+    },
+    "memory": {
+      "type": "streamable-http",
+      "url": "http://basic-memory:8000/mcp",
+      "enabled": true,
+      "owner": "admin",
+      "visibility": "group",
+      "sharedWithUsers": [
+        "claude",
+        "aldervall",
+        "skogix"
+      ],
+      "enableKeepAlive": true,
+      "keepAliveInterval": 60000,
+      "options": {
+        "timeout": 60000,
+        "resetTimeoutOnProgress": true
+      },
+      "oauth": {
+        "clientId": "claude",
+        "clientSecret": "claude1!"
+      },
+      "perSessionClient": true
+    },
+    "cloudflare-api": {
+      "type": "streamable-http",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "enabled": false,
+      "owner": "admin",
+      "visibility": "public",
+      "enableKeepAlive": false,
+      "options": {
+        "timeout": 60000,
+        "resetTimeoutOnProgress": true
+      },
+      "oauth": {
+        "clientId": "JS1dJkRYHZMSrpP7",
+        "pendingAuthorization": {
+          "codeVerifier": "OihzrfgkbsD2Z1rp~xNbtM_fHwpLKQHrvKCwrug4mhY",
+          "createdAt": 1789367047072,
+          "authorizationUrl": "https://mcp.cloudflare.com/authorize?response_type=code&client_id=JS1dJkRYHZMSrpP7&code_challenge=yIooF3ENNp5Lpg4wKyDr2jwOlvFlSaiPcCFMR6EROMA&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fmcp.skogai.se%2Foauth%2Fcallback&state=eyJzZXJ2ZXIiOiJjbG91ZGZsYXJlLWFwaSIsIm5vbmNlIjoiZTUyNjNkYmI0MmRhMzZkY2MzYjJjODdkM2U1ZDM3ODgifQ&scope=openid&resource=https%3A%2F%2Fmcp.cloudflare.com%2Fmcp",
+          "state": "eyJzZXJ2ZXIiOiJjbG91ZGZsYXJlLWFwaSIsIm5vbmNlIjoiZTUyNjNkYmI0MmRhMzZkY2MzYjJjODdkM2U1ZDM3ODgifQ"
+        }
       }
     }
   },
-  "users": [],
+  "users": [
+    {
+      "username": "admin",
+      "isAdmin": true
+    },
+    {
+      "username": "claude",
+      "isAdmin": false,
+      "email": "claude@skogai.se"
+    },
+    {
+      "username": "skogix",
+      "isAdmin": true,
+      "email": "skogix@skogai.se"
+    },
+    {
+      "username": "aldervall",
+      "isAdmin": true,
+      "email": "niklas@aldervall.se"
+    }
+  ],
+  "groups": [
+    {
+      "id": "5122f119-41e4-4321-b59c-8caf0c09d752",
+      "name": "claude-public",
+      "description": "",
+      "servers": [
+        {
+          "name": "sequential-thinking",
+          "tools": "all",
+          "prompts": "all",
+          "resources": "all"
+        },
+        {
+          "name": "context7",
+          "tools": "all",
+          "prompts": "all",
+          "resources": "all"
+        },
+        {
+          "name": "memory",
+          "tools": "all",
+          "prompts": "all",
+          "resources": "all"
+        }
+      ],
+      "owner": "admin"
+    }
+  ],
   "systemConfig": {
+    "routing": {
+      "enableGlobalRoute": true,
+      "enableGroupNameRoute": true,
+      "enableBearerAuth": true,
+      "bearerAuthKey": "",
+      "bearerAuthHeaderName": "Authorization",
+      "jsonBodyLimit": "1mb",
+      "skipAuth": false
+    },
+    "install": {
+      "pythonIndexUrl": "",
+      "npmRegistry": "",
+      "baseUrl": "https://mcp.skogai.se"
+    },
+    "smartRouting": {
+      "enabled": false,
+      "dbUrl": "",
+      "llmProviderApiKey": "",
+      "llmProviderBaseUrl": "",
+      "embeddingModel": ""
+    },
+    "toolResultCompression": {
+      "enabled": true,
+      "minTokens": 2000,
+      "maxOutputTokens": 1200,
+      "strategy": "auto"
+    },
+    "mcpRouter": {
+      "apiKey": "sk-FnyJPu4qIhP3MYFY4udxuuIoZYzYAdNdRS6p7Wr96OrX6",
+      "referer": "https://www.mcphub.app",
+      "title": "MCPHub",
+      "baseUrl": "https://api.mcprouter.to/v1"
+    },
+    "nameSeparator": "-",
+    "oauth": {},
     "oauthServer": {
       "enabled": true,
       "accessTokenLifetime": 3600,
@@ -56,9 +296,839 @@
         ],
         "requiresAuthentication": false
       }
-    }
+    },
+    "auth": {
+      "betterAuth": {
+        "providers": {
+          "oidc": {
+            "enabled": true,
+            "discoveryUrl": "https://auth.aldervall.se/.well-known/openid-configuration"
+          },
+          "google": {
+            "enabled": false
+          },
+          "github": {
+            "enabled": false
+          }
+        },
+        "trustedOrigins": [
+          "https://auth.aldervall.se"
+        ],
+        "enabled": false
+      }
+    },
+    "enableSessionRebuild": true,
+    "discovery": {},
+    "activityLog": null
   },
-  "bearerKeys": [],
-  "prompts": [],
-  "resources": []
+  "userConfigs": {},
+  "oauthClients": [
+    {
+      "clientId": "0108fd80450a486f7afd172dd9a9f5e3",
+      "name": "Claude Code (skogai)",
+      "redirectUris": [
+        "http://127.0.0.1:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "5d3f341d5ad1a2d1a143764d5bb1bd51",
+      "name": "Claude Code (skogmux)",
+      "redirectUris": [
+        "http://localhost:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "52e5d77d5aa27f6f607c4644f7d266e2",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "575c1701487efd1e24dfd847bac9cf6a",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "9436df5de4dae0df58b129495bba7c82",
+      "name": "Claude",
+      "redirectUris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "e990a6ec51060f05e48348f67998b48b",
+      "name": "playground-9vcEimuYx7JgcFVEnSuQb",
+      "redirectUris": [
+        "https://playground.ai.cloudflare.com/agents/playground/playground-9vcEimuYx7JgcFVEnSuQb/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://playground.ai.cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "4b61af244cb0bbdd45e7459e3a34797d",
+      "name": "Claude",
+      "redirectUris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "914bf1a3acebae246466479dabd2c15e",
+      "name": "Codex",
+      "redirectUris": [
+        "http://127.0.0.1:37861/callback/hOhUSkrOm7lW"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "ba34da80296c47b2cd0b7db73db64e66",
+      "name": "Codex",
+      "redirectUris": [
+        "http://127.0.0.1:37571/callback/hOhUSkrOm7lW"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "ec706d1084b303ae0b9593a2f5f4b691",
+      "name": "ChatGPT",
+      "redirectUris": [
+        "https://chatgpt.com/connector/oauth/8eSns0W1gbvf"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "5d99c53920309764c1990d0a91194d72",
+      "name": "Visual Studio Code - Insiders",
+      "redirectUris": [
+        "https://insiders.vscode.dev/redirect",
+        "https://vscode.dev/redirect",
+        "http://127.0.0.1/",
+        "http://127.0.0.1:33418/"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "client_uri": "https://code.visualstudio.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "c027ea674a4f142c6f734b5a54be75ce",
+      "name": "playground-8k9TdVIfE8Xxs-KTOMsYf",
+      "redirectUris": [
+        "https://playground.ai.cloudflare.com/agents/playground/playground-8k9TdVIfE8Xxs-KTOMsYf/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://playground.ai.cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "6586f07ae5e637e3040316824a9ae1ac",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "bea180e89a64d3c6cd67a42228bcf0fb",
+      "name": "Codex",
+      "redirectUris": [
+        "http://127.0.0.1:46435/callback/hOhUSkrOm7lW"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "3a0537b984651cc5553ab98c5a112fd3",
+      "name": "default",
+      "redirectUris": [
+        "https://cloud.skogai.se/agents/chat-agent/default/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloud.skogai.se",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "0541d417a5170bb6aa44f36e117ba408",
+      "name": "MCP Portal Client",
+      "redirectUris": [
+        "https://dash.cloudflare.com/ae931e241550e8326149eeda10ada60d/one/access-controls/ai-controls/mcp-server/oauth-callback/skogmcp"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "775ba240025ef66c084ebbcecff871f9",
+      "name": "Codex",
+      "redirectUris": [
+        "http://127.0.0.1:46703/callback/hOhUSkrOm7lW"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "b78fc73433bfcfd14cdbf7d8ae066596",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:40977/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "9a90b24d1875511faf83cc3e5a553764",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:33779/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "6d777f07a99a10c1df8441531fa9e2d9",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:42121/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "794f66c400dddc232e0ac52caae29a63",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:35381/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "1c1803d0f66fbb923de9be5e5bb55f7f",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:44379/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "7435435d76dfc4034193ead38fc0760d",
+      "name": "mcporter (skogmcp)",
+      "redirectUris": [
+        "http://127.0.0.1:38041/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "7bb4632272d0aa329d7b806690d0904a",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:63744/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "e30049b2f1fd6d1bfc35e5466c91000a",
+      "name": "Claude Code (skogmcp-claude-public)",
+      "redirectUris": [
+        "http://localhost:3118/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "1194aad180f7383e197d48ca193fd7cc",
+      "name": "Claude",
+      "redirectUris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "17555c92dc16d67cfd562231047cf081",
+      "name": "Claude",
+      "redirectUris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "600c0e861b51c3f397dc2d47c5bad6b0",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:63186/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "5919f6d773ca7d0c469563176757a965",
+      "name": "Cloudflare MCP Portal",
+      "redirectUris": [
+        "https://oauth-callbacks.cloudflareaccess.com/cdn-cgi/access/outbound-oauth-callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "1de413f9fd17539dc631935c40dc5a29",
+      "name": "Claude",
+      "redirectUris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "3a5f7346b011b24721fb2ec3d6bf2dc6",
+      "name": "MCP Portal Client",
+      "redirectUris": [
+        "https://dash.cloudflare.com/ae931e241550e8326149eeda10ada60d/one/access-controls/ai-controls/mcp-server/oauth-callback/skogmcp"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "243a9a1329492762a9d989da89467ce2",
+      "name": "MCP Portal Client",
+      "redirectUris": [
+        "https://dash.cloudflare.com/ae931e241550e8326149eeda10ada60d/one/access-controls/ai-controls/mcp-server/oauth-callback/skogmcp"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "c5f982668f9056e4454724d8ce5ae4a2",
+      "name": "Cloudflare MCP Portal",
+      "redirectUris": [
+        "https://portal.skogai.se/servers-callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "web",
+        "client_uri": "https://cloudflare.com",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    },
+    {
+      "clientId": "907f907efe674532c1016644c8ca1857",
+      "name": "Claude Code (skogmcp)",
+      "redirectUris": [
+        "http://localhost:63283/callback"
+      ],
+      "grants": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "scopes": [
+        "read",
+        "write"
+      ],
+      "owner": "dynamic-registration",
+      "metadata": {
+        "application_type": "native",
+        "token_endpoint_auth_method": "none",
+        "response_types": [
+          "code"
+        ]
+      }
+    }
+  ],
+  "oauthTokens": [],
+  "bearerKeys": [
+    {
+      "id": "ce94d5e8-b902-452e-846c-fe8fc7bc6237",
+      "name": "cli",
+      "enabled": true,
+      "kind": "system",
+      "owner": null,
+      "accessType": "all",
+      "allowedGroups": [],
+      "allowedServers": []
+    }
+  ]
 }
